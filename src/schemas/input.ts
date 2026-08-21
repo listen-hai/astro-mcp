@@ -98,3 +98,13 @@ export const AstroInputSchema = AstroInputObjectSchema.refine(
 );
 
 export type AstroInput = z.infer<typeof AstroInputObjectSchema>;
+
+export const LookupLocationSchema = z.object({
+  query: z
+    .string()
+    .min(1, 'Search query cannot be empty')
+    .max(120, 'query must be 120 characters or fewer.')
+    .describe('City name in English, e.g. "Tokyo", "London", "San Francisco"'),
+});
+
+export type LookupLocationInput = z.input<typeof LookupLocationSchema>;
