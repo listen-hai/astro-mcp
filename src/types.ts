@@ -7,6 +7,8 @@ export interface CityEntry {
   latitude: number;
   timezone: string;
   alternateTimezones?: string[];
+  /** City population, when the source database has it -- used to break same-name ambiguity by dominance (see resolver.ts). */
+  population?: number;
 }
 
 /** Geographic location needed for the Ascendant and house cusps. */

@@ -53,6 +53,7 @@ function toCityEntry(ct: CityTimezoneEntry): CityEntry {
     latitude: ct.lat,
     timezone,
     alternateTimezones: alternateTimezones.length > 0 ? alternateTimezones : undefined,
+    population: ct.pop,
   };
 }
 
@@ -218,7 +219,46 @@ export function resolveLocation(input: {
         };
       }
 
-      // Timezones disagree -> always refuse and list candidates.
+      // Timezones disagree, but if the top-ranked exact match's population
+      // dominates every conflicting-timezone runner-up by a wide margin, the
+      // ambiguity is theoretical rather than practical -- e.g. "Los Angeles"
+      // (US, pop ~8.1M) vs a same-named town in Bio-Bio, Chile (pop ~135k,
+      // ~60x smaller). Refusing outright would make one of the most common
+      // city names in astrology charts unusable. Genuinely comparable-size
+      // same-name cities (e.g. Cambridge UK ~145k vs Cambridge MA ~118k,
+      // ~1.2x) still fall through to the refusal below.
+      const DOMINANCE_RATIO = 10;
+      const top = exactNameMatches[0]; // already population-sorted, see lookupCity
+      const topPop = top.population ?? 0;
+      const runnerUp = exactNameMatches.find(c => c.timezone !== top.timezone);
+      const runnerUpPop = runnerUp?.population ?? 0;
+      const dominant = topPop > 0 && runnerUpPop > 0 && topPop >= runnerUpPop * DOMINANCE_RATIO;
+
+      if (dominant) {
+        const isAlternateTz = Boolean(input.timezone && top.alternateTimezones?.includes(input.timezone));
+        const isCustomTz = Boolean(input.timezone && input.timezone !== top.timezone && !isAlternateTz);
+        const locationSource: 'resolved' | 'mixed' = isCustomTz ? 'mixed' : 'resolved';
+        const dominanceNote =
+          `Place "${input.place}" matched multiple candidate cities with different timezones; picked ` +
+          `"${top.name} (${top.country})" (population ${Math.round(topPop).toLocaleString()}) over ` +
+          `"${runnerUp!.name} (${runnerUp!.country})" (population ${Math.round(runnerUpPop).toLocaleString()}), ` +
+          `a >=${DOMINANCE_RATIO}x difference. Pass explicit \`longitude\`+\`timezone\` if the smaller city was intended.`;
+
+        return {
+          longitude: top.longitude,
+          timezone: input.timezone || top.timezone,
+          latitude: top.latitude,
+          province: top.province,
+          placeName: `${top.name} (${top.country})`,
+          alternateTimezones: input.timezone ? undefined : top.alternateTimezones,
+          locationSource,
+          mixedWarning: isCustomTz
+            ? `${dominanceNote} Additionally, custom timezone ("${input.timezone}") was supplied by caller and used instead of the resolved one.`
+            : dominanceNote,
+        };
+      }
+
+      // Timezones disagree and no candidate dominates -> refuse and list candidates.
       // Getting the wrong timezone silently is catastrophic for a bazi chart.
       // The calling AI agent can easily clarify with the user and retry.
       const listStr = candidates

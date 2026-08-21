@@ -1,0 +1,599 @@
+/**
+ * Three-mode chart assembly (spec 4.3): the central "no faking it" promise.
+ *
+ * `computeChart` dispatches on which of `clockTime` / `clockTimeRange` is
+ * present:
+ *   - exact       -- full chart, no degradation.
+ *   - range       -- Ascendant/Midheaven reduce to candidate segments;
+ *                    everything Ascendant-dependent (houses, PartOfFortune)
+ *                    degrades with them.
+ *   - date_only   -- angles/houses/PartOfFortune are OMITTED FIELDS, not
+ *                    null placeholders; bodies get a degree range across
+ *                    the day and, on a sign-crossing day, two candidates.
+ *
+ * Degradation is implemented by never assigning the field in the first
+ * place -- not by computing it and deleting/nulling it afterwards.
+ */
+import * as AstronomyImport from 'astronomy-engine';
+import rootPkg from '../../package.json';
+import type { AstroInput } from '../schemas/input';
+import { ASTRO_DEFAULTS } from '../schemas/input';
+import type { Location } from '../types';
+import { resolveLocation } from '../geo/resolver';
+import { wallToUtc } from './time';
+import { bodyLongitude, bodyLatitude, bodyDeclination, bodySpeed } from '../ephemeris/engine';
+import { computeAngles } from '../ephemeris/angles';
+import { computeHouses, type HouseSystem, type Houses } from '../ephemeris/vendor/houses';
+import { pointPosition, type PointName } from '../ephemeris/points';
+import { smallBodyPosition } from '../ephemeris/smallbodies';
+import { computeAspects, type AspectPosition } from './aspects';
+import { dignityOf } from './dignity';
+import { toZodiac, ayanamsa, type Zodiac } from '../ephemeris/vendor/sidereal';
+import { obliquity, norm360 } from '../ephemeris/frames';
+import {
+  type Lang,
+  signOfLongitude,
+  signIndexOf,
+  signNameByIndex,
+  bodyName,
+  aspectName,
+  omissionReason,
+  dignityDisplay,
+  ACCURACY_NOTE,
+} from './i18n';
+import { formatDegree, houseOfLongitude, defaultOrbTable, formatLocalTime } from './output';
+
+const A = ((AstronomyImport as unknown as { default?: typeof AstronomyImport }).default ??
+  AstronomyImport) as typeof AstronomyImport;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AstroChart = Record<string, any>;
+
+const MAJOR_BODIES = [
+  'Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto',
+] as const;
+const ASTEROIDS = ['Ceres', 'Pallas', 'Juno', 'Vesta'] as const;
+const POINTS: readonly PointName[] = ['NorthNode', 'SouthNode', 'Lilith'];
+
+function bodyList(chironOn: boolean, asteroidsOn: boolean): string[] {
+  return [
+    ...MAJOR_BODIES,
+    ...(chironOn ? ['Chiron'] : []),
+    ...(asteroidsOn ? ASTEROIDS : []),
+  ];
+}
+
+interface RawPos {
+  lon: number;
+  lat: number;
+  dec: number;
+  speed: number;
+}
+
+/** Raw (tropical, unconverted) geocentric position for any body this project supports. */
+function rawBodyPosition(name: string, date: Date): RawPos {
+  if ((MAJOR_BODIES as readonly string[]).includes(name)) {
+    return {
+      lon: bodyLongitude(name, date),
+      lat: bodyLatitude(name, date),
+      dec: bodyDeclination(name, date),
+      speed: bodySpeed(name, date),
+    };
+  }
+  return smallBodyPosition(name, date);
+}
+
+function astronomyEngineVersion(): string {
+  const deps = (rootPkg as { dependencies?: Record<string, string> }).dependencies;
+  return deps?.['astronomy-engine'] ?? 'unknown';
+}
+
+function obliquityAt(date: Date): number {
+  return obliquity(A.MakeTime(date));
+}
+
+function anglesAndHousesAt(
+  date: Date,
+  loc: Location,
+  system: HouseSystem
+): { ascendant: number; midheaven: number; houses: Houses } {
+  const angles = computeAngles(date, loc);
+  const houses = computeHouses(system, angles.ascendant, angles.midheaven, loc, obliquityAt(date));
+  return { ascendant: angles.ascendant, midheaven: angles.midheaven, houses };
+}
+
+/** Shared, mode-independent setup: conventions, location, the body list, and the diagnostics fields common to every mode. */
+interface Ctx {
+  houseSystem: HouseSystem;
+  zodiac: Zodiac;
+  node: 'true' | 'mean';
+  lilithKind: 'mean' | 'true';
+  minorAspects: boolean;
+  declinationAspects: boolean;
+  chironOn: boolean;
+  asteroidsOn: boolean;
+  lang: Lang;
+  loc: Location;
+  timezone: string;
+  placeName: string | null;
+  year: number;
+  month: number;
+  day: number;
+  bodies: string[];
+  diagnosticsBase: Record<string, unknown>;
+}
+
+function buildCtx(input: AstroInput): Ctx {
+  const houseSystem = (input.houseSystem ?? ASTRO_DEFAULTS.houseSystem) as HouseSystem;
+  const zodiac = (input.zodiac ?? ASTRO_DEFAULTS.zodiac) as Zodiac;
+  const node = (input.node ?? ASTRO_DEFAULTS.node) as 'true' | 'mean';
+  const lilithKind = (input.lilith ?? ASTRO_DEFAULTS.lilith) as 'mean' | 'true';
+  const minorAspects = input.minorAspects ?? ASTRO_DEFAULTS.minorAspects;
+  const declinationAspects = input.declinationAspects ?? ASTRO_DEFAULTS.declinationAspects;
+  const chironOn = input.chiron ?? ASTRO_DEFAULTS.chiron;
+  const asteroidsOn = input.asteroids ?? ASTRO_DEFAULTS.asteroids;
+  const lang = (input.lang ?? ASTRO_DEFAULTS.lang) as Lang;
+
+  const resolved = resolveLocation({ place: input.place, longitude: input.longitude, timezone: input.timezone });
+  const latitude = input.latitude ?? resolved.latitude;
+  if (latitude === undefined) {
+    throw new Error(
+      'Could not determine birth latitude: pass `place`, or all of `longitude` + `latitude` + `timezone`.'
+    );
+  }
+
+  const included = [...(chironOn ? ['chiron'] : []), ...(asteroidsOn ? ['asteroids'] : [])];
+
+  return {
+    houseSystem,
+    zodiac,
+    node,
+    lilithKind,
+    minorAspects,
+    declinationAspects,
+    chironOn,
+    asteroidsOn,
+    lang,
+    loc: { latitude, longitude: resolved.longitude },
+    timezone: resolved.timezone,
+    placeName: resolved.placeName ?? input.place ?? null,
+    year: input.solarDate.year,
+    month: input.solarDate.month,
+    day: input.solarDate.day,
+    bodies: bodyList(chironOn, asteroidsOn),
+    diagnosticsBase: {
+      houseSystem,
+      zodiac,
+      node,
+      lilith: lilithKind,
+      orbs: defaultOrbTable(minorAspects),
+      included,
+      ephemeris: `astronomy-engine@${astronomyEngineVersion()}`,
+      accuracyNote: ACCURACY_NOTE[lang],
+    },
+  };
+}
+
+function resolvedLocationOutput(ctx: Ctx) {
+  return {
+    place: ctx.placeName,
+    longitude: ctx.loc.longitude,
+    latitude: ctx.loc.latitude,
+    timezone: ctx.timezone,
+  };
+}
+
+/** Matches aspects present at BOTH endpoints of a time span (spec 4.3 mode B/C): the
+ * only "aspect held throughout" claim honest enough to make without an exact time. */
+function aspectsOverRange(pos0: AspectPosition[], pos1: AspectPosition[], ctx: Ctx) {
+  const opts = { minorAspects: ctx.minorAspects, declinationAspects: ctx.declinationAspects };
+  const a0 = computeAspects(pos0, opts);
+  const a1 = computeAspects(pos1, opts);
+  const key = (a: { body1: string; body2: string; aspect: string }) => `${a.body1}|${a.body2}|${a.aspect}`;
+  const map1 = new Map(a1.map((a) => [key(a), a]));
+  const out: { body1: string; body2: string; aspect: string; orbRange: [number, number] }[] = [];
+  for (const a of a0) {
+    const b = map1.get(key(a));
+    if (!b) continue;
+    out.push({ body1: a.body1, body2: a.body2, aspect: aspectName(a.aspect, ctx.lang), orbRange: [a.orb, b.orb] });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Mode A: exact clock time
+// ---------------------------------------------------------------------------
+
+function computeExact(input: AstroInput, ctx: Ctx): AstroChart {
+  const { hour, minute } = input.clockTime!;
+  const utc = wallToUtc(ctx.year, ctx.month, ctx.day, hour, minute, ctx.timezone, input.dstFold ?? 0);
+
+  const { ascendant: rawAsc, midheaven: rawMc, houses: rawHouses } = anglesAndHousesAt(
+    utc,
+    ctx.loc,
+    ctx.houseSystem
+  );
+  const displayCusps = rawHouses.cusps.map((c) => toZodiac(c, ctx.zodiac, utc));
+  const displayAsc = toZodiac(rawAsc, ctx.zodiac, utc);
+  const displayMc = toZodiac(rawMc, ctx.zodiac, utc);
+
+  const positions: Record<string, unknown>[] = [];
+  const aspectPositions: AspectPosition[] = [];
+  let sunRaw: RawPos | undefined;
+  let moonRaw: RawPos | undefined;
+
+  const pushPosition = (internalName: string, raw: RawPos, dignityKind: string | null) => {
+    const disp = toZodiac(raw.lon, ctx.zodiac, utc);
+    const displayName = bodyName(internalName, ctx.lang);
+    positions.push({
+      body: displayName,
+      sign: signOfLongitude(disp, ctx.lang),
+      degree: formatDegree(disp),
+      longitude: disp,
+      latitude: raw.lat,
+      declination: raw.dec,
+      house: houseOfLongitude(raw.lon, rawHouses.cusps),
+      retrograde: raw.speed < 0,
+      speed: raw.speed,
+      dignity: dignityDisplay(dignityKind, ctx.lang),
+    });
+    aspectPositions.push({ body: displayName, lon: raw.lon, dec: raw.dec, speed: raw.speed });
+  };
+
+  for (const name of ctx.bodies) {
+    const raw = rawBodyPosition(name, utc);
+    pushPosition(name, raw, dignityOf(name, raw.lon).kind);
+    if (name === 'Sun') sunRaw = raw;
+    if (name === 'Moon') moonRaw = raw;
+  }
+  for (const point of POINTS) {
+    const raw = pointPosition(point, utc, { node: ctx.node, lilith: ctx.lilithKind });
+    pushPosition(point, raw, null);
+  }
+
+  const aspects = computeAspects(aspectPositions, {
+    minorAspects: ctx.minorAspects,
+    declinationAspects: ctx.declinationAspects,
+  }).map((a) => ({ ...a, aspect: aspectName(a.aspect, ctx.lang) }));
+
+  // Day/night (sect) for the Part of Fortune: Sun above the horizon (houses
+  // 7-12, the DSC-MC-ASC half) is a day chart. This reuses the same house
+  // division already computed for every other body, rather than a second
+  // altitude calculation.
+  const sunHouse = houseOfLongitude(sunRaw!.lon, rawHouses.cusps);
+  const sect: 'day' | 'night' = sunHouse >= 7 ? 'day' : 'night';
+  const pofRaw = norm360(
+    rawAsc + (sect === 'day' ? moonRaw!.lon - sunRaw!.lon : sunRaw!.lon - moonRaw!.lon)
+  );
+  const pofDisplay = toZodiac(pofRaw, ctx.zodiac, utc);
+
+  return {
+    birth: {
+      solarDate: input.solarDate,
+      clockTime: input.clockTime,
+      utc: utc.toISOString(),
+      resolvedLocation: resolvedLocationOutput(ctx),
+    },
+    highlights: {
+      sunSign: signOfLongitude(toZodiac(sunRaw!.lon, ctx.zodiac, utc), ctx.lang),
+      moonSign: signOfLongitude(toZodiac(moonRaw!.lon, ctx.zodiac, utc), ctx.lang),
+      ascendantSign: signOfLongitude(displayAsc, ctx.lang),
+    },
+    angles: {
+      ascendant: { longitude: displayAsc, sign: signOfLongitude(displayAsc, ctx.lang), degree: formatDegree(displayAsc) },
+      midheaven: { longitude: displayMc, sign: signOfLongitude(displayMc, ctx.lang), degree: formatDegree(displayMc) },
+    },
+    positions,
+    houses: { system: ctx.houseSystem, cusps: displayCusps, note: rawHouses.note },
+    aspects,
+    partOfFortune: {
+      longitude: pofDisplay,
+      sign: signOfLongitude(pofDisplay, ctx.lang),
+      degree: formatDegree(pofDisplay),
+      house: houseOfLongitude(pofRaw, rawHouses.cusps),
+      sect,
+    },
+    diagnostics: {
+      timePrecision: 'exact',
+      ...ctx.diagnosticsBase,
+      houseSystemFallback: rawHouses.note ?? null,
+      ayanamsa: ayanamsa(ctx.zodiac, utc),
+      omitted: [],
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Mode B: a clock-time window
+// ---------------------------------------------------------------------------
+
+type AngleFn = (ms: number) => number;
+
+/** Nudges `raw` by whole turns so it sits within 180 deg of `prev`, keeping an assumed-monotonic series continuous across the 360/0 wrap. */
+function unwrapNear(prev: number, raw: number): number {
+  let v = raw;
+  while (v < prev - 180) v += 360;
+  while (v > prev + 180) v -= 360;
+  return v;
+}
+
+function bisectOneBoundary(
+  msA: number,
+  degA: number,
+  msB: number,
+  target: number,
+  angleFn: AngleFn
+): number {
+  let lo = msA;
+  let hi = msB;
+  let loDeg = degA;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    const deg = unwrapNear(loDeg, angleFn(mid));
+    if (deg < target) {
+      lo = mid;
+      loDeg = deg;
+    } else {
+      hi = mid;
+    }
+  }
+  return Math.round((lo + hi) / 2);
+}
+
+/** Coarse-sample an assumed-monotonic angle and bisect every 30-degree (sign) crossing to sub-minute precision. Spec 4.3: valid only where the Ascendant is proven monotonic (|lat| <= 66), and unconditionally for the Midheaven. */
+function bisectSignBoundaries(t0: number, t1: number, angleFn: AngleFn): number[] {
+  const STEP_MS = 2 * 60_000; // finer than the steepest monotonic case measured (66 deg, spec 4.3)
+  const boundaries: number[] = [];
+  let prevMs = t0;
+  let prevDeg = angleFn(t0);
+  for (let ms = t0 + STEP_MS; ; ms += STEP_MS) {
+    const clamped = Math.min(ms, t1);
+    const nextDeg = unwrapNear(prevDeg, angleFn(clamped));
+    const k0 = Math.floor(prevDeg / 30);
+    const k1 = Math.floor(nextDeg / 30);
+    for (let k = k0 + 1; k <= k1; k++) {
+      boundaries.push(bisectOneBoundary(prevMs, prevDeg, clamped, k * 30, angleFn));
+    }
+    prevMs = clamped;
+    prevDeg = nextDeg;
+    if (clamped >= t1) break;
+  }
+  return boundaries;
+}
+
+interface SignSegment {
+  signIndex: number;
+  fromMs: number;
+  toMs: number;
+}
+
+function segmentsFromBoundaries(t0: number, t1: number, boundaries: number[], angleFn: AngleFn): SignSegment[] {
+  const pts = [t0, ...boundaries, t1].sort((a, b) => a - b);
+  const segs: SignSegment[] = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    if (b <= a) continue;
+    segs.push({ signIndex: signIndexOf(angleFn((a + b) / 2)), fromMs: a, toMs: b });
+  }
+  return segs;
+}
+
+/** Last-resort path above the polar circle (spec 4.3/5.2): the Ascendant is
+ * not monotonic there (measured: 132 reversals/day at 70N), so bisection
+ * would silently mislabel candidates. This groups every <=30s sample into
+ * contiguous same-sign runs instead of assuming a handful of crossings.
+ * ponytail: exact sub-second crossing times aren't refined further here --
+ * fine for the degenerate/rare polar case this exists for; tighten the step
+ * if a caller ever needs sub-30s resolution at these latitudes. */
+function scanSignRuns(t0: number, t1: number, angleFn: AngleFn): SignSegment[] {
+  const STEP_MS = 30_000; // spec 4.3: <=30s steps above the polar circle
+  const segs: SignSegment[] = [];
+  for (let ms = t0; ; ms += STEP_MS) {
+    const clamped = Math.min(ms, t1);
+    const signIndex = signIndexOf(angleFn(clamped));
+    const last = segs[segs.length - 1];
+    if (last && last.signIndex === signIndex) last.toMs = clamped;
+    else segs.push({ signIndex, fromMs: clamped, toMs: clamped });
+    if (clamped >= t1) break;
+  }
+  return segs;
+}
+
+function candidateList(segs: SignSegment[], lang: Lang, timezone: string) {
+  return segs.map((s) => ({
+    sign: signNameByIndex(s.signIndex, lang),
+    from: formatLocalTime(s.fromMs, timezone),
+    to: formatLocalTime(s.toMs, timezone),
+  }));
+}
+
+function computeRange(input: AstroInput, ctx: Ctx): AstroChart {
+  const range = input.clockTimeRange!;
+  const fromMin = range.from.hour * 60 + range.from.minute;
+  const toMin = range.to.hour * 60 + range.to.minute;
+  const crossesMidnight = fromMin > toMin;
+  const fold = input.dstFold ?? 0;
+  const t0 = wallToUtc(ctx.year, ctx.month, ctx.day, range.from.hour, range.from.minute, ctx.timezone, fold).getTime();
+  const t1 = wallToUtc(
+    ctx.year,
+    ctx.month,
+    ctx.day + (crossesMidnight ? 1 : 0),
+    range.to.hour,
+    range.to.minute,
+    ctx.timezone,
+    fold
+  ).getTime();
+
+  const ascAngleFn: AngleFn = (ms) => computeAngles(new Date(ms), ctx.loc).ascendant;
+  const mcAngleFn: AngleFn = (ms) => computeAngles(new Date(ms), ctx.loc).midheaven;
+
+  // Spec 4.3: strictly monotonic only within the polar circle; scan instead beyond it.
+  const ascendantMonotonic = Math.abs(ctx.loc.latitude) <= 66;
+  const ascSegs = ascendantMonotonic
+    ? segmentsFromBoundaries(t0, t1, bisectSignBoundaries(t0, t1, ascAngleFn), ascAngleFn)
+    : scanSignRuns(t0, t1, ascAngleFn);
+  const mcSegs = segmentsFromBoundaries(t0, t1, bisectSignBoundaries(t0, t1, mcAngleFn), mcAngleFn); // MC is monotonic at every latitude
+  const method: 'bisect' | 'scan' = ascendantMonotonic ? 'bisect' : 'scan';
+
+  const at0 = anglesAndHousesAt(new Date(t0), ctx.loc, ctx.houseSystem);
+  const at1 = anglesAndHousesAt(new Date(t1), ctx.loc, ctx.houseSystem);
+
+  const positions: Record<string, unknown>[] = [];
+  const aspects0: AspectPosition[] = [];
+  const aspects1: AspectPosition[] = [];
+  let sunSign0 = '';
+  let sunSign1 = '';
+  let moonSign0 = '';
+  let moonSign1 = '';
+
+  for (const name of ctx.bodies) {
+    const raw0 = rawBodyPosition(name, new Date(t0));
+    const raw1 = rawBodyPosition(name, new Date(t1));
+    const disp0 = toZodiac(raw0.lon, ctx.zodiac, new Date(t0));
+    const disp1 = toZodiac(raw1.lon, ctx.zodiac, new Date(t1));
+    const sign0 = signOfLongitude(disp0, ctx.lang);
+    const sign1 = signOfLongitude(disp1, ctx.lang);
+    const displayName = bodyName(name, ctx.lang);
+    const house0 = houseOfLongitude(raw0.lon, at0.houses.cusps);
+    const house1 = houseOfLongitude(raw1.lon, at1.houses.cusps);
+
+    positions.push({
+      body: displayName,
+      ...(sign0 === sign1 ? { sign: sign0 } : { signCandidates: [sign0, sign1] }),
+      degreeRange: [formatDegree(disp0), formatDegree(disp1)],
+      houseCandidates: [...new Set([house0, house1])],
+    });
+
+    aspects0.push({ body: displayName, lon: raw0.lon, dec: raw0.dec, speed: raw0.speed });
+    aspects1.push({ body: displayName, lon: raw1.lon, dec: raw1.dec, speed: raw1.speed });
+    if (name === 'Sun') {
+      sunSign0 = sign0;
+      sunSign1 = sign1;
+    }
+    if (name === 'Moon') {
+      moonSign0 = sign0;
+      moonSign1 = sign1;
+    }
+  }
+
+  return {
+    birth: {
+      solarDate: input.solarDate,
+      clockTimeRange: input.clockTimeRange,
+      resolvedLocation: resolvedLocationOutput(ctx),
+    },
+    highlights: {
+      ...(sunSign0 === sunSign1 ? { sunSign: sunSign0 } : { sunSignCandidates: [sunSign0, sunSign1] }),
+      ...(moonSign0 === moonSign1 ? { moonSign: moonSign0 } : { moonSignCandidates: [moonSign0, moonSign1] }),
+      ascendantSignCandidates: candidateList(ascSegs, ctx.lang, ctx.timezone),
+    },
+    angles: {
+      ascendant: { candidates: candidateList(ascSegs, ctx.lang, ctx.timezone) },
+      midheaven: { candidates: candidateList(mcSegs, ctx.lang, ctx.timezone) },
+    },
+    positions,
+    houses: { system: ctx.houseSystem, cuspsIndeterminate: true },
+    aspects: aspectsOverRange(aspects0, aspects1, ctx),
+    diagnostics: {
+      timePrecision: 'range',
+      method,
+      ascendantMonotonic,
+      range: {
+        from: formatLocalTime(t0, ctx.timezone),
+        to: formatLocalTime(t1, ctx.timezone),
+        crossesMidnight,
+      },
+      ...ctx.diagnosticsBase,
+      houseSystemFallback: at0.houses.note ?? at1.houses.note ?? null,
+      ayanamsa: ayanamsa(ctx.zodiac, new Date(t0)),
+      omitted: ['partOfFortune'],
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Mode C: date only
+// ---------------------------------------------------------------------------
+
+function computeDateOnly(input: AstroInput, ctx: Ctx): AstroChart {
+  const t0 = wallToUtc(ctx.year, ctx.month, ctx.day, 0, 0, ctx.timezone).getTime();
+  const t1 = wallToUtc(ctx.year, ctx.month, ctx.day + 1, 0, 0, ctx.timezone).getTime();
+
+  const positions: Record<string, unknown>[] = [];
+  const aspects0: AspectPosition[] = [];
+  const aspects1: AspectPosition[] = [];
+  let sunSign0 = '';
+  let sunSign1 = '';
+  let moonSign0 = '';
+  let moonSign1 = '';
+
+  const pushRangedPosition = (internalName: string, raw0: RawPos, raw1: RawPos) => {
+    const disp0 = toZodiac(raw0.lon, ctx.zodiac, new Date(t0));
+    const disp1 = toZodiac(raw1.lon, ctx.zodiac, new Date(t1));
+    const sign0 = signOfLongitude(disp0, ctx.lang);
+    const sign1 = signOfLongitude(disp1, ctx.lang);
+    const displayName = bodyName(internalName, ctx.lang);
+    positions.push({
+      body: displayName,
+      ...(sign0 === sign1 ? { sign: sign0 } : { signCandidates: [sign0, sign1] }),
+      degreeRange: [formatDegree(disp0), formatDegree(disp1)],
+    });
+    aspects0.push({ body: displayName, lon: raw0.lon, dec: raw0.dec, speed: raw0.speed });
+    aspects1.push({ body: displayName, lon: raw1.lon, dec: raw1.dec, speed: raw1.speed });
+    return { sign0, sign1 };
+  };
+
+  for (const name of ctx.bodies) {
+    const raw0 = rawBodyPosition(name, new Date(t0));
+    const raw1 = rawBodyPosition(name, new Date(t1));
+    const { sign0, sign1 } = pushRangedPosition(name, raw0, raw1);
+    if (name === 'Sun') {
+      sunSign0 = sign0;
+      sunSign1 = sign1;
+    }
+    if (name === 'Moon') {
+      moonSign0 = sign0;
+      moonSign1 = sign1;
+    }
+  }
+  for (const point of POINTS) {
+    const raw0 = pointPosition(point, new Date(t0), { node: ctx.node, lilith: ctx.lilithKind });
+    const raw1 = pointPosition(point, new Date(t1), { node: ctx.node, lilith: ctx.lilithKind });
+    pushRangedPosition(point, raw0, raw1);
+  }
+
+  const omitted = ['angles', 'houses', 'positions[].house', 'partOfFortune', 'aspects[].applying'].map((field) => ({
+    field,
+    reason: omissionReason(field, ctx.lang),
+  }));
+
+  return {
+    birth: {
+      solarDate: input.solarDate,
+      resolvedLocation: resolvedLocationOutput(ctx),
+    },
+    highlights: {
+      ...(sunSign0 === sunSign1 ? { sunSign: sunSign0 } : { sunSignCandidates: [sunSign0, sunSign1] }),
+      ...(moonSign0 === moonSign1 ? { moonSign: moonSign0 } : { moonSignCandidates: [moonSign0, moonSign1] }),
+    },
+    positions,
+    aspects: aspectsOverRange(aspects0, aspects1, ctx),
+    diagnostics: {
+      timePrecision: 'date_only',
+      ...ctx.diagnosticsBase,
+      houseSystemFallback: null,
+      ayanamsa: ayanamsa(ctx.zodiac, new Date(t0)),
+      omitted,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+
+export function computeChart(input: AstroInput): AstroChart {
+  const ctx = buildCtx(input);
+  if (input.clockTime) return computeExact(input, ctx);
+  if (input.clockTimeRange) return computeRange(input, ctx);
+  return computeDateOnly(input, ctx);
+}
