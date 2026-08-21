@@ -32,9 +32,19 @@ function arc(a: number, b: number): number {
   return norm360(b - a);
 }
 
-/** Whole Sign: each house is one whole sign, starting from the Ascendant's sign. */
-function wholeSign(ascendant: number, _midheaven: number): number[] {
-  const firstCusp = Math.floor(ascendant / 30) * 30;
+/**
+ * Whole Sign: each house is one whole sign, starting from the Ascendant's
+ * sign. `ascendant` here is in the raw (tropical) frame that the rest of this
+ * module works in, but "sign" is a display convention -- in a sidereal
+ * zodiac, the sign boundary sits `ayanamsaOffset` degrees away from a
+ * tropical multiple of 30. Floor in the DISPLAY frame, then shift back, so
+ * the cusps still land exactly on sign boundaries once the caller converts
+ * them back to display via the same offset.
+ */
+function wholeSign(ascendant: number, _midheaven: number, ayanamsaOffset: number): number[] {
+  const displayAscendant = norm360(ascendant - ayanamsaOffset);
+  const firstCuspDisplay = Math.floor(displayAscendant / 30) * 30;
+  const firstCusp = norm360(firstCuspDisplay + ayanamsaOffset);
   return Array.from({ length: 12 }, (_, i) => norm360(firstCusp + i * 30));
 }
 
@@ -153,11 +163,12 @@ export function computeHouses(
   ascendant: number,
   midheaven: number,
   location: Location,
-  obliquity: number
+  obliquity: number,
+  ayanamsaOffset = 0
 ): Houses {
   switch (system) {
     case 'whole-sign':
-      return { system, cusps: wholeSign(ascendant, midheaven), ascendant, midheaven };
+      return { system, cusps: wholeSign(ascendant, midheaven, ayanamsaOffset), ascendant, midheaven };
     case 'equal':
       return { system, cusps: equal(ascendant), ascendant, midheaven };
     case 'porphyry':

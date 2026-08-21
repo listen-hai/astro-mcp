@@ -40,12 +40,14 @@ export function computeAngles(date: Date, loc: Location): Angles {
   // from the MC" fails at 70N and 78N.
   if (norm360(ascendant - midheaven) > 180) ascendant = norm360(ascendant + 180);
 
-  // During polar night/day the ecliptic can sit entirely above or below the
-  // horizon, so no point on it is rising -- the Ascendant is degenerate by
-  // definition. Detection: the Ascendant formula's denominator vanishes when
-  // the ecliptic is tangent to the horizon, which only happens beyond the
-  // polar circle.
-  const degenerate = Math.abs(loc.latitude) > 66.56 && Math.abs(denom) < 1e-6;
+  // Degenerate above the true polar circle for this date's obliquity (not a
+  // fixed 66.56 constant -- obliquity drifts slowly). The previous check
+  // additionally required the instantaneous denominator to be ~0, which only
+  // happens for a few seconds a day and was unreachable in practice; the
+  // Ascendant is unreliable (near-stationary, see the east-horizon note
+  // above) for the whole time the observer is beyond the polar circle, not
+  // just at that instant.
+  const degenerate = Math.abs(loc.latitude) > 90 - eps * R2D;
 
   return { ascendant, midheaven, degenerate };
 }
