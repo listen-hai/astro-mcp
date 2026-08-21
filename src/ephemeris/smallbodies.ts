@@ -22,7 +22,6 @@ function stepDaysFor(name: string): number {
   return name === 'Chiron' ? STEP_DAYS_OUTER : STEP_DAYS_INNER;
 }
 
-const REF = A.MakeTime(new Date('2000-01-01T00:00:00Z')); // JD 2451544.5 TDB, matches the seeds
 const C_AU_PER_DAY = 173.144632674; // speed of light, AU/day
 
 interface Seed {
@@ -34,26 +33,42 @@ interface Seed {
   vz: number;
 }
 
-function seedOf(name: string): AstronomyImport.StateVector {
-  const s = (seedsData as unknown as Record<string, Seed>)[name];
-  if (!s) throw new Error(`No JPL seed for small body "${name}". Known bodies: ${SMALL_BODIES.join(', ')}`);
-  return new A.StateVector(s.x, s.y, s.z, s.vx, s.vy, s.vz, REF);
+// Seeds are stored every 20 years (1900..2100) instead of a single J2000
+// epoch. Starting from the nearest one caps the integration distance at 10
+// years instead of up to 100 -- roughly 10x fewer GravitySimulator steps,
+// and shorter integration is also more accurate.
+function nearestEpochOf(name: string, date: Date): { ref: AstronomyImport.AstroTime; seed: Seed } {
+  const epochs = (seedsData as unknown as Record<string, Record<string, Seed>>)[name];
+  if (!epochs) throw new Error(`No JPL seed for small body "${name}". Known bodies: ${SMALL_BODIES.join(', ')}`);
+  const t1 = date.getTime();
+  let bestIso = '';
+  let bestDiff = Infinity;
+  for (const iso of Object.keys(epochs)) {
+    const diff = Math.abs(new Date(iso).getTime() - t1);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestIso = iso;
+    }
+  }
+  return { ref: A.MakeTime(new Date(bestIso)), seed: epochs[bestIso] };
 }
 
 /**
- * Builds a GravitySimulator seeded from the JPL state vector and advances it
- * from J2000 to `date` in fixed small steps.
+ * Builds a GravitySimulator seeded from the nearest JPL epoch and advances it
+ * to `date` in fixed small steps.
  *
  * A single Update() spanning decades produces 100+ deg of error (this is
  * auseklis's A2 defect) -- the simulator's own docs call for "a small time
  * step" per Update() call. Splitting into small fixed-size increments (see
  * `stepDaysFor`) is what keeps 1900-2100 accurate; Update() itself supports
  * negative steps too, so the same loop works whether `date` is before or
- * after REF.
+ * after the chosen epoch.
  */
 function integrate(name: string, date: Date): AstronomyImport.GravitySimulator {
-  const sim = new A.GravitySimulator(A.Body.Sun, REF, [seedOf(name)]);
-  const t0 = REF.date.getTime();
+  const { ref, seed: s } = nearestEpochOf(name, date);
+  const seedVector = new A.StateVector(s.x, s.y, s.z, s.vx, s.vy, s.vz, ref);
+  const sim = new A.GravitySimulator(A.Body.Sun, ref, [seedVector]);
+  const t0 = ref.date.getTime();
   const t1 = date.getTime();
   const steps = Math.max(1, Math.ceil(Math.abs(t1 - t0) / 86400000 / stepDaysFor(name)));
   for (let i = 1; i <= steps; i++) {
