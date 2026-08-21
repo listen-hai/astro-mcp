@@ -239,9 +239,14 @@ export function resolveLocation(input: {
       // ambiguity is theoretical rather than practical -- e.g. "Los Angeles"
       // (US, pop ~8.1M) vs a same-named town in Bio-Bio, Chile (pop ~135k,
       // ~60x smaller). Refusing outright would make one of the most common
-      // city names in astrology charts unusable. Genuinely comparable-size
-      // same-name cities (e.g. Cambridge UK ~145k vs Cambridge MA ~118k,
-      // ~1.2x) still fall through to the refusal below.
+      // city names in astrology charts unusable.
+      //
+      // Genuinely comparable same-name cities still fall through to the
+      // refusal below: "Springfield" tops out at MA ~287k against MO ~181k
+      // in a different zone, only ~1.6x, so the caller is asked to be more
+      // specific. Verified against the shipped city-timezones data, not
+      // assumed -- note that database holds only ONE Cambridge (GB), so
+      // Cambridge is NOT an example of this branch.
       const DOMINANCE_RATIO = 10;
       const top = exactNameMatches[0]; // already population-sorted, see lookupCity
       const topPop = top.population ?? 0;
