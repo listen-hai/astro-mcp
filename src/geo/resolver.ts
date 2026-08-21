@@ -1,21 +1,6 @@
 import { find as findTimezones } from 'geo-tz';
-import type { CityTimezoneEntry } from 'city-timezones';
-import { createRequire } from 'node:module';
+import cityTimezones, { CityTimezoneEntry } from 'city-timezones';
 import { CityEntry } from '../types';
-
-// Load the raw data file instead of `import cityTimezones from 'city-timezones'`
-// + `.cityMapping`: the package's own index.js does nothing but this same
-// require, so this is equivalent data, but it keeps the literal identifier
-// "cityMapping" out of our source entirely -- a bundler cannot avoid
-// preserving a property-access name like `.cityMapping` through minification
-// (that's what a plain member access is), so the only way to keep the
-// published dist/index.js free of it while still bundling comfortably is to
-// never write it in the first place. createRequire (rather than a static
-// `import ... with { type: 'json' }`) keeps this working on Node 18, which
-// this package still targets (see package.json engines).
-const cityMapping: CityTimezoneEntry[] = createRequire(import.meta.url)(
-  'city-timezones/data/cityMap.json'
-);
 
 /**
  * Normalizes query string for fuzzy search:
@@ -81,7 +66,7 @@ export function lookupCity(query: string): CityEntry[] {
   if (!query || !query.trim()) return [];
 
   const norm = normalizeQuery(query);
-  const db: CityTimezoneEntry[] = cityMapping;
+  const db: CityTimezoneEntry[] = cityTimezones.cityMapping;
 
   const exactMatches: CityTimezoneEntry[] = [];
   const partialMatches: CityTimezoneEntry[] = [];
@@ -212,15 +197,32 @@ export function resolveLocation(input: {
       const sameTimezone = exactNameMatches.length > 0 &&
         exactNameMatches.every(c => c.timezone === exactNameMatches[0].timezone);
 
-      // All exact-name matches agree on timezone -> no chart impact, pick silently.
+      // All exact-name matches agree on timezone. That is a genuinely safe
+      // "no chart impact, pick silently" shortcut for bazi (longitude-only),
+      // but NOT for a Western chart: latitude drives the Ascendant directly,
+      // so same-timezone namesakes that disagree on latitude (e.g. Columbus,
+      // OH at 40.0N vs Columbus, GA at 32.5N, both America/New_York) still
+      // need disclosing.
       if (sameTimezone) {
         const city = candidates[0];
+        const LAT_SPREAD_THRESHOLD = 1; // degrees
+        const lats = exactNameMatches.map(c => c.latitude);
+        const latSpread = Math.max(...lats) - Math.min(...lats);
+        const latNote =
+          latSpread > LAT_SPREAD_THRESHOLD
+            ? `Place "${input.place}" matched multiple candidate cities sharing timezone "${city.timezone}" but ` +
+              `differing in latitude by ${latSpread.toFixed(1)}°, which changes the Ascendant; picked ` +
+              `"${city.name} (${city.country})". Candidates: ` +
+              exactNameMatches.map(c => `${c.name} (${c.province || ''}, ${c.country}) @ ${c.latitude}°N`).join('; ')
+            : undefined;
+
         const isAlternateTz = Boolean(input.timezone && city.alternateTimezones?.includes(input.timezone));
         const isCustomTz = Boolean(input.timezone && input.timezone !== city.timezone && !isAlternateTz);
         const locationSource: 'resolved' | 'mixed' = isCustomTz ? 'mixed' : 'resolved';
-        const mixedWarning = isCustomTz
+        const customTzNote = isCustomTz
           ? `Place "${input.place}" was resolved for coordinates (${city.longitude}°), but custom timezone ("${input.timezone}") was supplied by caller.`
           : undefined;
+        const mixedWarning = [customTzNote, latNote].filter(Boolean).join(' ') || undefined;
 
         return {
           longitude: city.longitude,
@@ -279,7 +281,7 @@ export function resolveLocation(input: {
       }
 
       // Timezones disagree and no candidate dominates -> refuse and list candidates.
-      // Getting the wrong timezone silently is catastrophic for a bazi chart.
+      // Getting the wrong timezone silently is catastrophic for a natal chart.
       // The calling AI agent can easily clarify with the user and retry.
       const listStr = candidates
         .slice(0, 5)

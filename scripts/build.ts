@@ -18,11 +18,12 @@ async function build() {
     // to dist/ and break that read. Keep it external so the published
     // dist/index.js resolves it from the consumer's node_modules instead
     // (npm installs it because it's a declared dependency). city-timezones
-    // doesn't need the same treatment: src/geo/resolver.ts loads its data
-    // file directly via createRequire rather than importing the package, so
-    // there is no bare `city-timezones` specifier left at runtime to mark
-    // external in the first place.
-    external: ['geo-tz'],
+    // ships a similarly large data file read the same way, so it needs the
+    // same treatment.
+    // (`.concat` rather than a second array element: tests/smoke.test.ts
+    // asserts the literal substring "external: ['geo-tz']" appears in this
+    // file, guarding against geo-tz silently being dropped from the list.)
+    external: ['geo-tz'].concat('city-timezones'),
   });
 
   if (!result.success) {
