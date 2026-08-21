@@ -6,6 +6,7 @@
  */
 import { norm360 } from '../ephemeris/frames';
 import { MAJOR_ASPECTS, MINOR_ASPECTS } from './aspects';
+import { aspectName, type Lang } from './i18n';
 
 /** Forward (always positive) arc from `a` to `b`, in [0, 360). */
 export function fwdArc(a: number, b: number): number {
@@ -48,11 +49,13 @@ export function houseOfLongitude(longitude: number, cusps: number[]): number {
   return n;
 }
 
-/** Static default orb table (spec 8) -- not currently exposed as an input override. */
-export function defaultOrbTable(minorAspects: boolean): Record<string, number> {
+/** Static default orb table (spec 8) -- not currently exposed as an input override.
+ * Keys are aspect names in the requested display language: this is user-facing
+ * diagnostics output, governed by the same `lang` switch as everything else. */
+export function defaultOrbTable(minorAspects: boolean, lang: Lang): Record<string, number> {
   const table: Record<string, number> = {};
-  for (const d of MAJOR_ASPECTS) table[d.name] = d.orb;
-  if (minorAspects) for (const d of MINOR_ASPECTS) table[d.name] = d.orb;
+  for (const d of MAJOR_ASPECTS) table[aspectName(d.name, lang)] = d.orb;
+  if (minorAspects) for (const d of MINOR_ASPECTS) table[aspectName(d.name, lang)] = d.orb;
   return table;
 }
 
