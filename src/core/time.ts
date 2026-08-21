@@ -93,13 +93,20 @@ export function wallToUtc(
  * Same as `wallToUtc`, except a spring-forward gap resolves to the gap's edge
  * instead of throwing.
  *
- * Only appropriate for a caller whose wall time is itself an INTERVAL
- * ENDPOINT rather than something the user actually typed -- e.g. mode C's
- * "midnight to midnight" sampling window (spec 4.3). The user gave no time at
- * all there, so an error about a UTC-derived midnight that happens not to
- * exist in this timezone would be about an implementation detail, not
- * anything they entered. A real user-supplied `clockTime`/`clockTimeRange`
- * must keep throwing via `wallToUtc` -- that gap is genuinely theirs to fix.
+ * Appropriate for any wall time that is an INTERVAL ENDPOINT rather than an
+ * asserted instant of birth:
+ *
+ *  - mode C's midnight-to-midnight sampling window (spec 4.3), which the user
+ *    never typed at all, so an error about it would be about an internal
+ *    detail rather than their input;
+ *  - mode B's `clockTimeRange` bounds. The user did type those, but they bound
+ *    elapsed real time ("sometime before half past midnight") rather than name
+ *    an instant, and the birth demonstrably happened inside the interval that
+ *    really elapsed. Refusing would be pedantry about a window the caller was
+ *    already telling us was fuzzy. `clamped` lets the caller disclose it.
+ *
+ * An exact `clockTime` must keep throwing via `wallToUtc`: there the caller IS
+ * naming an instant, and that instant genuinely never occurred.
  */
 export function wallToUtcOrGapEdge(
   y: number,
@@ -107,10 +114,11 @@ export function wallToUtcOrGapEdge(
   d: number,
   h: number,
   mi: number,
-  timeZone: string
-): Date {
+  timeZone: string,
+  fold: 0 | 1 = 0
+): Date & { clamped?: true } {
   try {
-    return wallToUtc(y, mo, d, h, mi, timeZone);
+    return wallToUtc(y, mo, d, h, mi, timeZone, fold);
   } catch {
     const wall = Date.UTC(y, mo - 1, d, h, mi, 0);
     let lo = wall - BRACKET_MS;
@@ -122,6 +130,8 @@ export function wallToUtcOrGapEdge(
       if (wallClockAt(mid, timeZone) < wall) lo = mid;
       else hi = mid;
     }
-    return new Date(hi);
+    const edge = new Date(hi) as Date & { clamped?: true };
+    edge.clamped = true;
+    return edge;
   }
 }

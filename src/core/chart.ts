@@ -497,8 +497,14 @@ function computeRange(input: AstroInput, ctx: Ctx): AstroChart {
   const spanMin = crossesMidnight ? 1440 - fromMin + toMin : toMin - fromMin;
   const sweepsFullTurn = spanMin > 720;
   const fold = input.dstFold ?? 0;
-  const t0 = wallToUtc(ctx.year, ctx.month, ctx.day, range.from.hour, range.from.minute, ctx.timezone, fold).getTime();
-  const t1 = wallToUtc(
+  // Endpoints bound elapsed real time rather than assert an instant of birth,
+  // so a wall-clock time skipped by a spring-forward is clamped to the gap
+  // edge instead of rejected -- the same reasoning date-only mode applies to
+  // its midnight boundaries. An exact `clockTime` still errors, because there
+  // the caller IS asserting a specific instant.
+  const from0 = wallToUtcOrGapEdge(ctx.year, ctx.month, ctx.day, range.from.hour, range.from.minute, ctx.timezone, fold);
+  const t0 = from0.getTime();
+  const to1 = wallToUtcOrGapEdge(
     ctx.year,
     ctx.month,
     ctx.day + (crossesMidnight ? 1 : 0),
@@ -506,7 +512,12 @@ function computeRange(input: AstroInput, ctx: Ctx): AstroChart {
     range.to.minute,
     ctx.timezone,
     fold
-  ).getTime();
+  );
+  const t1 = to1.getTime();
+  // Disclose rather than refuse: an endpoint the local clock skipped was moved
+  // to the edge of the gap. The caller told us the window was fuzzy, so this
+  // is not worth an error -- but it is worth saying out loud.
+  const gapClamped = Boolean(from0.clamped || to1.clamped);
 
   // Candidate segmentation must run on the DISPLAY (zodiac-converted) angle,
   // not the raw tropical one -- otherwise every candidate sign in a sidereal
@@ -601,6 +612,11 @@ function computeRange(input: AstroInput, ctx: Ctx): AstroChart {
       ...ctx.diagnosticsBase,
       houseSystemFallback: at0.houses.note ?? at1.houses.note ?? null,
       ayanamsa: ayanamsa(ctx.zodiac, new Date(t0)),
+      ...(gapClamped ? {
+        note: 'One or both ends of clockTimeRange fell in an hour the local '
+          + 'clock skipped for daylight saving; the window was clamped to the '
+          + 'edge of that gap.',
+      } : {}),
       omitted: ['partOfFortune', 'aspects[].applying'].map((field) => ({
         field,
         reason: omissionReason(field, ctx.lang),

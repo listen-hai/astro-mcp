@@ -267,3 +267,31 @@ test('range mode declares applying as omitted, exactly as date-only does', () =>
   expect(b.diagnostics.omitted.map((o: { field: string }) => o.field))
     .toContain('aspects[].applying');
 });
+
+test('a range endpoint inside a DST gap is clamped, while an exact time still errors', () => {
+  // A window endpoint bounds elapsed real time; if the wall clock skips an
+  // hour that night, the birth still happened somewhere inside the real
+  // interval, so clamping to the gap edge is right -- same reasoning that
+  // already applies to date-only mode's midnight boundaries.
+  const chile = { longitude: -70.65, latitude: -33.45, timezone: 'America/Santiago' };
+  expect(() => computeChart({
+    solarDate: { year: 2079, month: 9, day: 2 }, ...chile,
+    clockTimeRange: { from: { hour: 22, minute: 0 }, to: { hour: 0, minute: 33 } },
+  } as never)).not.toThrow();
+
+  // An exact clockTime is different: the caller is asserting a specific
+  // instant of birth, and that instant genuinely does not exist.
+  expect(() => computeChart({
+    solarDate: { year: 2079, month: 9, day: 3 }, ...chile,
+    clockTime: { hour: 0, minute: 33 },
+  } as never)).toThrow(/does not exist/i);
+});
+
+test('a clamped range endpoint is disclosed in diagnostics, not swallowed', () => {
+  const c = computeChart({
+    solarDate: { year: 2079, month: 9, day: 2 },
+    longitude: -70.65, latitude: -33.45, timezone: 'America/Santiago',
+    clockTimeRange: { from: { hour: 22, minute: 0 }, to: { hour: 0, minute: 33 } },
+  } as never);
+  expect(c.diagnostics.note).toMatch(/skipped|daylight|clamp/i);
+});

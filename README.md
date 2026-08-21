@@ -133,15 +133,16 @@ Resolves an English city name to longitude, latitude, and IANA timezone across 7
 Measured against JPL Horizons (`QUANTITIES=31`, light-time-corrected), across 1900–2050–2100:
 
 - **Major bodies (Sun–Pluto) and lunar nodes:** ≤ 1 arcminute across the whole range. The Moon specifically needed `SetDeltaTFunction(DeltaT_JplHorizons)` instead of `astronomy-engine`'s default Delta-T model to hold that bound at 2100 (0.02′ vs 1.31′ with the default model).
-- **Small bodies** (Chiron + the four asteroids, via `GravitySimulator` seeded from JPL state vectors): ≤ 1.5 arcminutes, with the seed/model dominating the error more than integration step size. Chiron uses a 4-day integration step; the four inner asteroids (much faster, much closer orbits) need a 0.25-day step to hold the same bound — a 4-day step was measured up to 2° off for them, an entire wrong sign.
+- **Small bodies** (Chiron + the four asteroids, via `GravitySimulator` seeded from JPL state vectors): **≤ 0.4 arcminutes**, comfortably inside the 1.5′ budget the tests enforce. Chiron uses a 4-day integration step; the four inner asteroids (much faster, much closer orbits) need a 0.25-day step to hold that bound — a 4-day step was measured up to 2° off for them, an entire wrong sign.
+- **Seeds are stored at 11 epochs** (every 20 years, 1900–2100) rather than at J2000 alone, so no integration ever runs more than ~10 years. That was originally a performance fix — a 1900 chart with asteroids took 4.7 s and risked tripping an MCP client timeout, and now takes ~450 ms — but a shorter integration also drifts less, which is why the figures below improved along with the speed. `scripts/pull-seeds.ts` regenerates the whole table from JPL.
 
 | Body | 1900 | 1950 | 1990 | 2026 | 2050 | 2100 | Step |
 |---|---|---|---|---|---|---|---|
-| Chiron | 1.07′ | 0.67′ | 0.32′ | 0.18′ | 0.01′ | 0.13′ | 4 days |
-| Ceres | 0.47′ | 0.32′ | 0.26′ | 0.17′ | 0.43′ | 0.21′ | 0.25 days |
-| Pallas | 0.57′ | 0.33′ | 0.39′ | 0.37′ | 0.17′ | 0.03′ | 0.25 days |
-| Juno | 0.04′ | 0.19′ | 0.28′ | 0.11′ | 0.22′ | 0.75′ | 0.25 days |
-| Vesta | 0.17′ | 0.32′ | 0.20′ | 0.16′ | 0.11′ | 0.20′ | 0.25 days |
+| Chiron | 0.33′ | 0.32′ | 0.32′ | 0.15′ | 0.28′ | 0.26′ | 4 days |
+| Ceres | 0.35′ | 0.26′ | 0.26′ | 0.16′ | 0.37′ | 0.15′ | 0.25 days |
+| Pallas | 0.37′ | 0.16′ | 0.39′ | 0.22′ | 0.05′ | 0.22′ | 0.25 days |
+| Juno | 0.35′ | 0.04′ | 0.28′ | 0.30′ | 0.27′ | 0.33′ | 0.25 days |
+| Vesta | 0.04′ | 0.33′ | 0.20′ | 0.16′ | 0.12′ | 0.28′ | 0.25 days |
 
 The true lunar node is independently self-checked against `astronomy-engine`'s own node-crossing events (`SearchMoonNode`/`NextMoonNode`): the Moon's ecliptic longitude at a crossing must equal the true node's longitude (or its antipode) to within 1 arcsecond — measured max deviation 0.01″.
 
