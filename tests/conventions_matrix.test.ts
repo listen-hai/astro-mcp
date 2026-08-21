@@ -125,11 +125,27 @@ test('a calendar date that does not exist is refused, not rolled forward', () =>
 });
 
 test('date-only mode survives a timezone whose next midnight does not exist', () => {
-  // Santiago springs forward at midnight. The user supplied no time at all,
-  // so an error about a nonexistent 00:00 is unrelated to anything they typed.
+  // Chile springs forward AT midnight, so the day-boundary the date-only mode
+  // uses as its upper endpoint is a wall-clock time that does not exist. The
+  // user supplied no time at all, so an error about a nonexistent 00:00 is
+  // unrelated to anything they typed.
+  //
+  // Explicit coordinates, not place: 'Santiago' -- that name is genuinely
+  // ambiguous (Chile 2.88M vs Santo Domingo 1.47M, only 1.96x apart, under
+  // the 10x dominance threshold) and is correctly refused by the ambiguity
+  // guard. Using the bare name here would test two unrelated things at once.
+  expect(() => computeChart({
+    solarDate: { year: 2026, month: 9, day: 5 },
+    longitude: -70.65, latitude: -33.45, timezone: 'America/Santiago',
+  } as never)).not.toThrow();
+});
+
+test('the ambiguity guard still refuses genuinely close namesakes', () => {
+  // Guards the other half of the case above: loosening the dominance ratio to
+  // make bare 'Santiago' resolve would gut the disclosure discipline.
   expect(() => computeChart({
     solarDate: { year: 2026, month: 9, day: 5 }, place: 'Santiago',
-  } as never)).not.toThrow();
+  } as never)).toThrow(/multiple candidate|specify more/i);
 });
 
 // ------------------------------------------------------------ axis aspects

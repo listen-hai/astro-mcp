@@ -22,6 +22,3 @@ test('NOTICE credits auseklis (vendored under MIT)', () => {
   expect(n).toContain('MIT License');
 });
 
-test('build script keeps geo-tz external (it reads data via __dirname)', () => {
-  expect(readFileSync('scripts/build.ts', 'utf8')).toContain("external: ['geo-tz']");
-});

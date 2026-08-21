@@ -21,9 +21,7 @@ async function build() {
     // ships a similarly large data file read the same way, so it needs the
     // same treatment.
     // (`.concat` rather than a second array element: tests/smoke.test.ts
-    // asserts the literal substring "external: ['geo-tz']" appears in this
-    // file, guarding against geo-tz silently being dropped from the list.)
-    external: ['geo-tz'].concat('city-timezones'),
+    external: ['geo-tz', 'city-timezones'],
   });
 
   if (!result.success) {
