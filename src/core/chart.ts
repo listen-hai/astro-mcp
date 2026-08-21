@@ -147,6 +147,18 @@ function buildCtx(input: AstroInput): Ctx {
 
   assertValidCalendarDate(input.solarDate.year, input.solarDate.month, input.solarDate.day);
 
+  // Guard here rather than only in the zod schema: computeChart is exported and
+  // callable directly, so the schema's refine does not cover every caller.
+  // Latitude drives the Ascendant and every cusp, so blending an explicit one
+  // into a resolved city yields a chart for neither location -- silently.
+  if (input.place && (input.latitude !== undefined || input.longitude !== undefined)) {
+    throw new Error(
+      'Pass either `place` or explicit `longitude`+`latitude`+`timezone`, not both. '
+      + 'Latitude drives the Ascendant, so grafting one onto a resolved city would '
+      + 'silently produce a chart for neither location.'
+    );
+  }
+
   const resolved = resolveLocation({ place: input.place, longitude: input.longitude, timezone: input.timezone });
   const latitude = input.latitude ?? resolved.latitude;
   if (latitude === undefined) {
@@ -451,7 +463,17 @@ function candidateList(segs: SignSegment[], lang: Lang, timezone: string) {
  * endpoints rather than just the two of them -- a several-hour window can
  * cross more than one house boundary.
  */
-function houseRangeCandidates(house0: number, house1: number): number[] {
+/**
+ * Houses a body passes through between the two window endpoints.
+ *
+ * House numbers decrease as the cusps rotate forward in time (mod 12), so
+ * walking house0 down to house1 enumerates the span. `fullTurn` covers the
+ * case where the window is long enough that the cusps come all the way back
+ * around: no house spans 180 deg, so equal endpoints plus more than half a
+ * turn of sweep means every house was crossed.
+ */
+function houseRangeCandidates(house0: number, house1: number, fullTurn = false): number[] {
+  if (fullTurn) return Array.from({ length: 12 }, (_, i) => i + 1);
   const out: number[] = [house0];
   let h = house0;
   for (let i = 0; i < 12 && h !== house1; i++) {
@@ -469,6 +491,11 @@ function computeRange(input: AstroInput, ctx: Ctx): AstroChart {
     throw new Error('clockTimeRange.from and .to are identical -- a zero-width window has no candidates to report.');
   }
   const crossesMidnight = fromMin > toMin;
+  // Cusps make one full turn per sidereal day. A window spanning more than
+  // half a day sweeps more than half a turn, so if the start and end houses
+  // still coincide the body must have gone all the way around.
+  const spanMin = crossesMidnight ? 1440 - fromMin + toMin : toMin - fromMin;
+  const sweepsFullTurn = spanMin > 720;
   const fold = input.dstFold ?? 0;
   const t0 = wallToUtc(ctx.year, ctx.month, ctx.day, range.from.hour, range.from.minute, ctx.timezone, fold).getTime();
   const t1 = wallToUtc(
@@ -529,7 +556,7 @@ function computeRange(input: AstroInput, ctx: Ctx): AstroChart {
       body: displayName,
       ...(sign0 === sign1 ? { sign: sign0 } : { signCandidates: [sign0, sign1] }),
       degreeRange: [formatDegree(disp0), formatDegree(disp1)],
-      houseCandidates: houseRangeCandidates(house0, house1),
+      houseCandidates: houseRangeCandidates(house0, house1, sweepsFullTurn && house0 === house1),
     });
 
     aspects0.push({ body: displayName, lon: raw0.lon, dec: raw0.dec, speed: raw0.speed, id: name });
@@ -574,7 +601,10 @@ function computeRange(input: AstroInput, ctx: Ctx): AstroChart {
       ...ctx.diagnosticsBase,
       houseSystemFallback: at0.houses.note ?? at1.houses.note ?? null,
       ayanamsa: ayanamsa(ctx.zodiac, new Date(t0)),
-      omitted: [{ field: 'partOfFortune', reason: omissionReason('partOfFortune', ctx.lang) }],
+      omitted: ['partOfFortune', 'aspects[].applying'].map((field) => ({
+        field,
+        reason: omissionReason(field, ctx.lang),
+      })),
     },
   };
 }

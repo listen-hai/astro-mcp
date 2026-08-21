@@ -20,7 +20,6 @@ async function build() {
     // (npm installs it because it's a declared dependency). city-timezones
     // ships a similarly large data file read the same way, so it needs the
     // same treatment.
-    // (`.concat` rather than a second array element: tests/smoke.test.ts
     external: ['geo-tz', 'city-timezones'],
   });
 

@@ -250,13 +250,18 @@ export function resolveLocation(input: {
       // assumed -- note that database holds only ONE Cambridge (GB), so
       // Cambridge is NOT an example of this branch.
       const DOMINANCE_RATIO = 10;
-      const top = exactNameMatches[0]; // already population-sorted, see lookupCity
-      const topPop = top.population ?? 0;
-      const runnerUp = exactNameMatches.find(c => c.timezone !== top.timezone);
+      // Guard: a query that only PARTIALLY matched (e.g. "Spring" hitting
+      // Springfield/Springdale in different zones) has no exact matches at
+      // all, so there is nothing to rank -- fall through to the candidate
+      // list below rather than indexing an empty array.
+      const top = exactNameMatches.length > 0 ? exactNameMatches[0] : undefined;
+      const topPop = top?.population ?? 0;
+      const runnerUp = top ? exactNameMatches.find(c => c.timezone !== top.timezone) : undefined;
       const runnerUpPop = runnerUp?.population ?? 0;
-      const dominant = topPop > 0 && runnerUpPop > 0 && topPop >= runnerUpPop * DOMINANCE_RATIO;
+      const dominant = Boolean(top) && topPop > 0 && runnerUpPop > 0
+        && topPop >= runnerUpPop * DOMINANCE_RATIO;
 
-      if (dominant) {
+      if (dominant && top) {
         const isAlternateTz = Boolean(input.timezone && top.alternateTimezones?.includes(input.timezone));
         const isCustomTz = Boolean(input.timezone && input.timezone !== top.timezone && !isAlternateTz);
         const locationSource: 'resolved' | 'mixed' = isCustomTz ? 'mixed' : 'resolved';

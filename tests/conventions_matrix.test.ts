@@ -211,3 +211,59 @@ test('English output does not leak Chinese diagnostic keys', () => {
   const c = computeChart({ ...EXACT, lang: 'en' } as never);
   expect(Object.keys(c.diagnostics.orbs).join('')).not.toMatch(/[一-龥]/);
 });
+
+// ------------------------------------------------------- input-space gaps
+// Every test above (and every test in the rest of the suite) passes an exact
+// city name. The partial-match path had zero coverage, and that is where a
+// raw TypeError was leaking to MCP callers.
+
+test('a partial place match across timezones is refused, never crashed on', () => {
+  // "Spring" prefix-matches Springfield/Springdale/... in several zones while
+  // exactly matching none of them. The dominance branch read [0] of an empty
+  // array and threw "undefined is not an object" straight at the caller.
+  for (const place of ['Spring', 'Santo', 'San Jo']) {
+    let err: unknown;
+    try {
+      computeChart({
+        solarDate: { year: 1990, month: 6, day: 15 },
+        clockTime: { hour: 20, minute: 0 }, place,
+      } as never);
+    } catch (e) { err = e; }
+    expect(err).toBeDefined();
+    const msg = String((err as Error).message ?? err);
+    expect(msg).not.toMatch(/undefined is not an object|Cannot read/i);
+    expect(msg).toMatch(/multiple candidate|specify more|no match/i);
+  }
+});
+
+test('a near-24h window enumerates every house, not just the endpoint one', () => {
+  // from 20:00 to 19:59 is a legal 23h59m window. The cusps sweep a full turn,
+  // so the body passes through all twelve houses -- but the enumeration loop
+  // stops immediately when the start and end house coincide.
+  const c = computeChart({
+    solarDate: { year: 1990, month: 6, day: 15 }, place: 'Los Angeles',
+    clockTimeRange: { from: { hour: 20, minute: 0 }, to: { hour: 19, minute: 59 } },
+  } as never);
+  const sun = c.positions.find((p: { body: string }) => p.body === '太阳');
+  expect(sun.houseCandidates).toHaveLength(12);
+});
+
+test('mixing `place` with an explicit latitude is refused, not silently blended', () => {
+  // The resolver already refuses `place` + `longitude` without a timezone.
+  // Latitude drives the Ascendant directly, so silently letting a caller
+  // graft an unrelated latitude onto a resolved city is the same class of
+  // mistake with a worse blast radius.
+  expect(() => computeChart({
+    solarDate: { year: 1990, month: 6, day: 15 }, clockTime: { hour: 20, minute: 0 },
+    place: 'Los Angeles', latitude: 60,
+  } as never)).toThrow(/latitude|both|either/i);
+});
+
+test('range mode declares applying as omitted, exactly as date-only does', () => {
+  const b = computeChart({
+    solarDate: { year: 1990, month: 6, day: 15 }, place: 'Los Angeles',
+    clockTimeRange: { from: { hour: 18, minute: 0 }, to: { hour: 23, minute: 59 } },
+  } as never);
+  expect(b.diagnostics.omitted.map((o: { field: string }) => o.field))
+    .toContain('aspects[].applying');
+});

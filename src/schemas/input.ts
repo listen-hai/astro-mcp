@@ -95,6 +95,17 @@ export const AstroInputSchema = AstroInputObjectSchema.refine(
 ).refine(
   (v) => v.place || (v.longitude !== undefined && v.latitude !== undefined && v.timezone),
   { message: 'Provide either `place`, or all of `longitude` + `latitude` + `timezone`.' }
+).refine(
+  // Latitude drives the Ascendant and every house cusp. Letting a caller graft
+  // one onto a resolved city yields a chart for neither location, silently.
+  // The resolver already refuses `place` + `longitude` without a timezone;
+  // this closes the same hole on the other coordinate.
+  (v) => !(v.place && (v.longitude !== undefined || v.latitude !== undefined)),
+  {
+    message: 'Pass either `place` or explicit `longitude`+`latitude`+`timezone`, not both. '
+      + 'Latitude drives the Ascendant, so grafting one onto a resolved city would '
+      + 'silently produce a chart for neither location.',
+  }
 );
 
 export type AstroInput = z.infer<typeof AstroInputObjectSchema>;
