@@ -18,9 +18,18 @@ test('an ordinary time round-trips to the right UTC instant', () => {
   // 1990-06-15 20:00 PDT (UTC-7) -> 1990-06-16 03:00 UTC
   expect(wallToUtc(1990, 6, 15, 20, 0, 'America/Los_Angeles', 0).toISOString())
     .toBe('1990-06-16T03:00:00.000Z');
-  // Beijing is UTC+8 year-round
+  // NOT UTC+8: China observed daylight saving from 1986 to 1991, so a summer
+  // 1990 birth in Shanghai is UTC+9. Anyone assuming a flat UTC+8 for Chinese
+  // birth data lands an hour off for those six summers -- enough to move the
+  // Ascendant by ~15 deg, and enough to change a Bazi hour pillar outright.
   expect(wallToUtc(1990, 6, 15, 20, 0, 'Asia/Shanghai', 0).toISOString())
-    .toBe('1990-06-15T12:00:00.000Z');
+    .toBe('1990-06-15T11:00:00.000Z');
+  // Winter of the same year is back to UTC+8.
+  expect(wallToUtc(1990, 1, 15, 20, 0, 'Asia/Shanghai', 0).toISOString())
+    .toBe('1990-01-15T12:00:00.000Z');
+  // And so is any modern date.
+  expect(wallToUtc(2026, 6, 15, 20, 0, 'Asia/Shanghai', 0).toISOString())
+    .toBe('2026-06-15T12:00:00.000Z');
 });
 
 test('southern-hemisphere DST runs the other way round', () => {
