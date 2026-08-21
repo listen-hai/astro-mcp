@@ -246,7 +246,9 @@ export function createAstroMcpServer(): Server {
     try {
       return await callTool(name, args);
     } catch (err: unknown) {
-      const message = err instanceof z.ZodError ? err.issues.map(i => i.message).join('; ') : err instanceof Error ? err.message : String(err);
+      const message = err instanceof z.ZodError
+        ? err.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ')
+        : err instanceof Error ? err.message : String(err);
       return { isError: true, content: [{ type: 'text', text: `[Astro Calculation Error] ${message}` }] };
     }
   });
