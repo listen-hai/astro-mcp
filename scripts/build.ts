@@ -17,7 +17,11 @@ async function build() {
     // path.join(__dirname, '..', 'data'); bundling it would rebase __dirname
     // to dist/ and break that read. Keep it external so the published
     // dist/index.js resolves it from the consumer's node_modules instead
-    // (npm installs it because it's a declared dependency).
+    // (npm installs it because it's a declared dependency). city-timezones
+    // doesn't need the same treatment: src/geo/resolver.ts loads its data
+    // file directly via createRequire rather than importing the package, so
+    // there is no bare `city-timezones` specifier left at runtime to mark
+    // external in the first place.
     external: ['geo-tz'],
   });
 

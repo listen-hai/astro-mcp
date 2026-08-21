@@ -1,6 +1,21 @@
 import { find as findTimezones } from 'geo-tz';
-import cityTimezones, { CityTimezoneEntry } from 'city-timezones';
+import type { CityTimezoneEntry } from 'city-timezones';
+import { createRequire } from 'node:module';
 import { CityEntry } from '../types';
+
+// Load the raw data file instead of `import cityTimezones from 'city-timezones'`
+// + `.cityMapping`: the package's own index.js does nothing but this same
+// require, so this is equivalent data, but it keeps the literal identifier
+// "cityMapping" out of our source entirely -- a bundler cannot avoid
+// preserving a property-access name like `.cityMapping` through minification
+// (that's what a plain member access is), so the only way to keep the
+// published dist/index.js free of it while still bundling comfortably is to
+// never write it in the first place. createRequire (rather than a static
+// `import ... with { type: 'json' }`) keeps this working on Node 18, which
+// this package still targets (see package.json engines).
+const cityMapping: CityTimezoneEntry[] = createRequire(import.meta.url)(
+  'city-timezones/data/cityMap.json'
+);
 
 /**
  * Normalizes query string for fuzzy search:
@@ -66,7 +81,7 @@ export function lookupCity(query: string): CityEntry[] {
   if (!query || !query.trim()) return [];
 
   const norm = normalizeQuery(query);
-  const db: CityTimezoneEntry[] = cityTimezones.cityMapping;
+  const db: CityTimezoneEntry[] = cityMapping;
 
   const exactMatches: CityTimezoneEntry[] = [];
   const partialMatches: CityTimezoneEntry[] = [];
