@@ -20,7 +20,7 @@ import type { AstroInput } from '../schemas/input';
 import { ASTRO_DEFAULTS } from '../schemas/input';
 import type { Location } from '../types';
 import { resolveLocation } from '../geo/resolver';
-import { wallToUtc } from './time';
+import { wallToUtc, wallToUtcOrGapEdge, assertValidCalendarDate } from './time';
 import { bodyLongitude, bodyLatitude, bodyDeclination, bodySpeed } from '../ephemeris/engine';
 import { computeAngles } from '../ephemeris/angles';
 import { computeHouses, type HouseSystem, type Houses } from '../ephemeris/vendor/houses';
@@ -41,7 +41,7 @@ import {
   dignityDisplay,
   ACCURACY_NOTE,
 } from './i18n';
-import { formatDegree, houseOfLongitude, defaultOrbTable, formatLocalTime } from './output';
+import { formatDegree, houseOfLongitude, defaultOrbTable, formatLocalTime, fwdArc } from './output';
 
 const A = ((AstronomyImport as unknown as { default?: typeof AstronomyImport }).default ??
   AstronomyImport) as typeof AstronomyImport;
@@ -95,11 +95,22 @@ function obliquityAt(date: Date): number {
 function anglesAndHousesAt(
   date: Date,
   loc: Location,
-  system: HouseSystem
-): { ascendant: number; midheaven: number; houses: Houses } {
+  system: HouseSystem,
+  zodiac: Zodiac
+): { ascendant: number; midheaven: number; houses: Houses; degenerate: boolean } {
   const angles = computeAngles(date, loc);
-  const houses = computeHouses(system, angles.ascendant, angles.midheaven, loc, obliquityAt(date));
-  return { ascendant: angles.ascendant, midheaven: angles.midheaven, houses };
+  // Whole Sign cusps must land on sign boundaries in the DISPLAY zodiac, not
+  // the raw tropical one (spec: sidereal + whole-sign) -- pass the ayanamsa
+  // through so it can floor in the right frame.
+  const houses = computeHouses(
+    system,
+    angles.ascendant,
+    angles.midheaven,
+    loc,
+    obliquityAt(date),
+    ayanamsa(zodiac, date)
+  );
+  return { ascendant: angles.ascendant, midheaven: angles.midheaven, houses, degenerate: angles.degenerate };
 }
 
 /** Shared, mode-independent setup: conventions, location, the body list, and the diagnostics fields common to every mode. */
@@ -134,6 +145,8 @@ function buildCtx(input: AstroInput): Ctx {
   const asteroidsOn = input.asteroids ?? ASTRO_DEFAULTS.asteroids;
   const lang = (input.lang ?? ASTRO_DEFAULTS.lang) as Lang;
 
+  assertValidCalendarDate(input.solarDate.year, input.solarDate.month, input.solarDate.day);
+
   const resolved = resolveLocation({ place: input.place, longitude: input.longitude, timezone: input.timezone });
   const latitude = input.latitude ?? resolved.latitude;
   if (latitude === undefined) {
@@ -166,12 +179,29 @@ function buildCtx(input: AstroInput): Ctx {
       zodiac,
       node,
       lilith: lilithKind,
-      orbs: defaultOrbTable(minorAspects),
+      orbs: defaultOrbTable(minorAspects, lang),
       included,
       ephemeris: `astronomy-engine@${astronomyEngineVersion()}`,
       accuracyNote: ACCURACY_NOTE[lang],
+      location: {
+        source: resolved.locationSource,
+        warning: resolved.mixedWarning ?? null,
+        alternateTimezones: resolved.alternateTimezones ?? null,
+      },
     },
   };
+}
+
+/**
+ * Snaps a longitude to 1e-9 degrees and re-wraps into [0, 360). Whole Sign
+ * cusps are analytically exact multiples of 30 in the display zodiac, but
+ * reaching them via raw-frame arithmetic (add the ayanamsa, then subtract it
+ * again in a different magnitude range) leaves ~1e-13 deg of float noise --
+ * astronomically meaningless (the ephemeris itself only claims ~1 arcminute)
+ * but enough to land just on the wrong side of a mod-30 boundary.
+ */
+function roundDeg(longitude: number): number {
+  return norm360(Math.round(longitude * 1e9) / 1e9);
 }
 
 function resolvedLocationOutput(ctx: Ctx) {
@@ -208,12 +238,9 @@ function computeExact(input: AstroInput, ctx: Ctx): AstroChart {
   const { hour, minute } = input.clockTime!;
   const utc = wallToUtc(ctx.year, ctx.month, ctx.day, hour, minute, ctx.timezone, input.dstFold ?? 0);
 
-  const { ascendant: rawAsc, midheaven: rawMc, houses: rawHouses } = anglesAndHousesAt(
-    utc,
-    ctx.loc,
-    ctx.houseSystem
-  );
-  const displayCusps = rawHouses.cusps.map((c) => toZodiac(c, ctx.zodiac, utc));
+  const { ascendant: rawAsc, midheaven: rawMc, houses: rawHouses, degenerate: ascendantDegenerate } =
+    anglesAndHousesAt(utc, ctx.loc, ctx.houseSystem, ctx.zodiac);
+  const displayCusps = rawHouses.cusps.map((c) => roundDeg(toZodiac(c, ctx.zodiac, utc)));
   const displayAsc = toZodiac(rawAsc, ctx.zodiac, utc);
   const displayMc = toZodiac(rawMc, ctx.zodiac, utc);
 
@@ -222,9 +249,13 @@ function computeExact(input: AstroInput, ctx: Ctx): AstroChart {
   let sunRaw: RawPos | undefined;
   let moonRaw: RawPos | undefined;
 
-  const pushPosition = (internalName: string, raw: RawPos, dignityKind: string | null) => {
+  const pushPosition = (internalName: string, raw: RawPos) => {
     const disp = toZodiac(raw.lon, ctx.zodiac, utc);
     const displayName = bodyName(internalName, ctx.lang);
+    // Dignity is judged against the DISPLAYED sign, not the raw tropical one
+    // -- otherwise a sidereal chart can show e.g. "Venus, Aries: Domicile"
+    // while Venus is actually in sidereal Taurus, contradicting itself.
+    const dignity = dignityOf(internalName, disp);
     positions.push({
       body: displayName,
       sign: signOfLongitude(disp, ctx.lang),
@@ -235,20 +266,21 @@ function computeExact(input: AstroInput, ctx: Ctx): AstroChart {
       house: houseOfLongitude(raw.lon, rawHouses.cusps),
       retrograde: raw.speed < 0,
       speed: raw.speed,
-      dignity: dignityDisplay(dignityKind, ctx.lang),
+      dignity: dignityDisplay(dignity.kind, ctx.lang),
+      dignityModern: dignity.modern,
     });
-    aspectPositions.push({ body: displayName, lon: raw.lon, dec: raw.dec, speed: raw.speed });
+    aspectPositions.push({ body: displayName, lon: raw.lon, dec: raw.dec, speed: raw.speed, id: internalName });
   };
 
   for (const name of ctx.bodies) {
     const raw = rawBodyPosition(name, utc);
-    pushPosition(name, raw, dignityOf(name, raw.lon).kind);
+    pushPosition(name, raw);
     if (name === 'Sun') sunRaw = raw;
     if (name === 'Moon') moonRaw = raw;
   }
   for (const point of POINTS) {
     const raw = pointPosition(point, utc, { node: ctx.node, lilith: ctx.lilithKind });
-    pushPosition(point, raw, null);
+    pushPosition(point, raw);
   }
 
   const aspects = computeAspects(aspectPositions, {
@@ -256,14 +288,17 @@ function computeExact(input: AstroInput, ctx: Ctx): AstroChart {
     declinationAspects: ctx.declinationAspects,
   }).map((a) => ({ ...a, aspect: aspectName(a.aspect, ctx.lang) }));
 
-  // Day/night (sect) for the Part of Fortune: Sun above the horizon (houses
-  // 7-12, the DSC-MC-ASC half) is a day chart. This reuses the same house
-  // division already computed for every other body, rather than a second
-  // altitude calculation.
-  const sunHouse = houseOfLongitude(sunRaw!.lon, rawHouses.cusps);
-  const sect: 'day' | 'night' = sunHouse >= 7 ? 'day' : 'night';
+  // Day/night (sect) for the Part of Fortune is a PHYSICAL fact -- was the
+  // Sun above the horizon -- and must not depend on which house system the
+  // caller asked to display (Placidus vs whole-sign disagree on where a body
+  // falls, but never on which side of the Asc/Dsc axis it's on). Houses 7-12
+  // (the DSC-MC-ASC half) rotate the same way as an Ascendant-anchored equal
+  // division always does, regardless of the display house system, so a
+  // forward arc from the raw Ascendant gives the same answer independent of
+  // ctx.houseSystem.
+  const dayChart = fwdArc(rawAsc, sunRaw!.lon) >= 180;
   const pofRaw = norm360(
-    rawAsc + (sect === 'day' ? moonRaw!.lon - sunRaw!.lon : sunRaw!.lon - moonRaw!.lon)
+    rawAsc + (dayChart ? moonRaw!.lon - sunRaw!.lon : sunRaw!.lon - moonRaw!.lon)
   );
   const pofDisplay = toZodiac(pofRaw, ctx.zodiac, utc);
 
@@ -291,13 +326,14 @@ function computeExact(input: AstroInput, ctx: Ctx): AstroChart {
       sign: signOfLongitude(pofDisplay, ctx.lang),
       degree: formatDegree(pofDisplay),
       house: houseOfLongitude(pofRaw, rawHouses.cusps),
-      sect,
+      dayChart,
     },
     diagnostics: {
       timePrecision: 'exact',
       ...ctx.diagnosticsBase,
       houseSystemFallback: rawHouses.note ?? null,
       ayanamsa: ayanamsa(ctx.zodiac, utc),
+      ascendantDegenerate,
       omitted: [],
     },
   };
@@ -408,10 +444,30 @@ function candidateList(segs: SignSegment[], lang: Lang, timezone: string) {
   }));
 }
 
+/**
+ * House numbers sweep backward (mod 12) as time advances within a fixed
+ * house system (the wheel rotates forward under a body that barely moves).
+ * "Candidates" promises an enumeration, so list every house between the two
+ * endpoints rather than just the two of them -- a several-hour window can
+ * cross more than one house boundary.
+ */
+function houseRangeCandidates(house0: number, house1: number): number[] {
+  const out: number[] = [house0];
+  let h = house0;
+  for (let i = 0; i < 12 && h !== house1; i++) {
+    h = h === 1 ? 12 : h - 1;
+    out.push(h);
+  }
+  return out;
+}
+
 function computeRange(input: AstroInput, ctx: Ctx): AstroChart {
   const range = input.clockTimeRange!;
   const fromMin = range.from.hour * 60 + range.from.minute;
   const toMin = range.to.hour * 60 + range.to.minute;
+  if (fromMin === toMin) {
+    throw new Error('clockTimeRange.from and .to are identical -- a zero-width window has no candidates to report.');
+  }
   const crossesMidnight = fromMin > toMin;
   const fold = input.dstFold ?? 0;
   const t0 = wallToUtc(ctx.year, ctx.month, ctx.day, range.from.hour, range.from.minute, ctx.timezone, fold).getTime();
@@ -425,8 +481,11 @@ function computeRange(input: AstroInput, ctx: Ctx): AstroChart {
     fold
   ).getTime();
 
-  const ascAngleFn: AngleFn = (ms) => computeAngles(new Date(ms), ctx.loc).ascendant;
-  const mcAngleFn: AngleFn = (ms) => computeAngles(new Date(ms), ctx.loc).midheaven;
+  // Candidate segmentation must run on the DISPLAY (zodiac-converted) angle,
+  // not the raw tropical one -- otherwise every candidate sign in a sidereal
+  // chart is silently shifted by a whole ayanamsa (~24 deg).
+  const ascAngleFn: AngleFn = (ms) => toZodiac(computeAngles(new Date(ms), ctx.loc).ascendant, ctx.zodiac, new Date(ms));
+  const mcAngleFn: AngleFn = (ms) => toZodiac(computeAngles(new Date(ms), ctx.loc).midheaven, ctx.zodiac, new Date(ms));
 
   // Spec 4.3: strictly monotonic only within the polar circle; scan instead beyond it.
   const ascendantMonotonic = Math.abs(ctx.loc.latitude) <= 66;
@@ -436,8 +495,8 @@ function computeRange(input: AstroInput, ctx: Ctx): AstroChart {
   const mcSegs = segmentsFromBoundaries(t0, t1, bisectSignBoundaries(t0, t1, mcAngleFn), mcAngleFn); // MC is monotonic at every latitude
   const method: 'bisect' | 'scan' = ascendantMonotonic ? 'bisect' : 'scan';
 
-  const at0 = anglesAndHousesAt(new Date(t0), ctx.loc, ctx.houseSystem);
-  const at1 = anglesAndHousesAt(new Date(t1), ctx.loc, ctx.houseSystem);
+  const at0 = anglesAndHousesAt(new Date(t0), ctx.loc, ctx.houseSystem, ctx.zodiac);
+  const at1 = anglesAndHousesAt(new Date(t1), ctx.loc, ctx.houseSystem, ctx.zodiac);
 
   const positions: Record<string, unknown>[] = [];
   const aspects0: AspectPosition[] = [];
@@ -447,9 +506,17 @@ function computeRange(input: AstroInput, ctx: Ctx): AstroChart {
   let moonSign0 = '';
   let moonSign1 = '';
 
-  for (const name of ctx.bodies) {
-    const raw0 = rawBodyPosition(name, new Date(t0));
-    const raw1 = rawBodyPosition(name, new Date(t1));
+  const posAt = (name: string, ms: number): RawPos =>
+    (POINTS as readonly string[]).includes(name)
+      ? pointPosition(name as PointName, new Date(ms), { node: ctx.node, lilith: ctx.lilithKind })
+      : rawBodyPosition(name, new Date(ms));
+
+  // Nodes/Lilith are pure functions of time (no ephemeris lookup to degrade),
+  // so there is no reason to omit them here the way the Ascendant-derived
+  // fields are omitted -- evaluate them at both endpoints just like the bodies.
+  for (const name of [...ctx.bodies, ...POINTS]) {
+    const raw0 = posAt(name, t0);
+    const raw1 = posAt(name, t1);
     const disp0 = toZodiac(raw0.lon, ctx.zodiac, new Date(t0));
     const disp1 = toZodiac(raw1.lon, ctx.zodiac, new Date(t1));
     const sign0 = signOfLongitude(disp0, ctx.lang);
@@ -462,11 +529,11 @@ function computeRange(input: AstroInput, ctx: Ctx): AstroChart {
       body: displayName,
       ...(sign0 === sign1 ? { sign: sign0 } : { signCandidates: [sign0, sign1] }),
       degreeRange: [formatDegree(disp0), formatDegree(disp1)],
-      houseCandidates: [...new Set([house0, house1])],
+      houseCandidates: houseRangeCandidates(house0, house1),
     });
 
-    aspects0.push({ body: displayName, lon: raw0.lon, dec: raw0.dec, speed: raw0.speed });
-    aspects1.push({ body: displayName, lon: raw1.lon, dec: raw1.dec, speed: raw1.speed });
+    aspects0.push({ body: displayName, lon: raw0.lon, dec: raw0.dec, speed: raw0.speed, id: name });
+    aspects1.push({ body: displayName, lon: raw1.lon, dec: raw1.dec, speed: raw1.speed, id: name });
     if (name === 'Sun') {
       sunSign0 = sign0;
       sunSign1 = sign1;
@@ -507,7 +574,7 @@ function computeRange(input: AstroInput, ctx: Ctx): AstroChart {
       ...ctx.diagnosticsBase,
       houseSystemFallback: at0.houses.note ?? at1.houses.note ?? null,
       ayanamsa: ayanamsa(ctx.zodiac, new Date(t0)),
-      omitted: ['partOfFortune'],
+      omitted: [{ field: 'partOfFortune', reason: omissionReason('partOfFortune', ctx.lang) }],
     },
   };
 }
@@ -517,8 +584,12 @@ function computeRange(input: AstroInput, ctx: Ctx): AstroChart {
 // ---------------------------------------------------------------------------
 
 function computeDateOnly(input: AstroInput, ctx: Ctx): AstroChart {
-  const t0 = wallToUtc(ctx.year, ctx.month, ctx.day, 0, 0, ctx.timezone).getTime();
-  const t1 = wallToUtc(ctx.year, ctx.month, ctx.day + 1, 0, 0, ctx.timezone).getTime();
+  // The user gave no time at all here -- these midnight boundaries only exist
+  // to bound the day's sampling window (spec 4.3), so a timezone whose next
+  // midnight happens to fall in a DST spring-forward gap (e.g. Santiago) must
+  // not surface as an error about a time nobody typed.
+  const t0 = wallToUtcOrGapEdge(ctx.year, ctx.month, ctx.day, 0, 0, ctx.timezone).getTime();
+  const t1 = wallToUtcOrGapEdge(ctx.year, ctx.month, ctx.day + 1, 0, 0, ctx.timezone).getTime();
 
   const positions: Record<string, unknown>[] = [];
   const aspects0: AspectPosition[] = [];
@@ -539,8 +610,8 @@ function computeDateOnly(input: AstroInput, ctx: Ctx): AstroChart {
       ...(sign0 === sign1 ? { sign: sign0 } : { signCandidates: [sign0, sign1] }),
       degreeRange: [formatDegree(disp0), formatDegree(disp1)],
     });
-    aspects0.push({ body: displayName, lon: raw0.lon, dec: raw0.dec, speed: raw0.speed });
-    aspects1.push({ body: displayName, lon: raw1.lon, dec: raw1.dec, speed: raw1.speed });
+    aspects0.push({ body: displayName, lon: raw0.lon, dec: raw0.dec, speed: raw0.speed, id: internalName });
+    aspects1.push({ body: displayName, lon: raw1.lon, dec: raw1.dec, speed: raw1.speed, id: internalName });
     return { sign0, sign1 };
   };
 
