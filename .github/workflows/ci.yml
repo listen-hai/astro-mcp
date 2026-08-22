@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Bun does not typecheck at runtime, so a signature mismatch can sit in
+      # main behind a fully green suite. It has happened here already.
+      - name: Typecheck
+        run: bunx tsc --noEmit
+
+      # tests/horizons_parity.test.ts calls the JPL Horizons public API. It
+      # probes reachability first and skips rather than failing when NASA is
+      # down, so a red build here means our own numbers moved.
+      - name: Run test suite
+        run: bun run test
+
+      - name: Build bundle
+        run: bun run build
+
+      - name: Verify the built server answers over stdio
+        run: |
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | timeout 30 node dist/index.js | tee /dev/stderr | grep -q 'calculate_natal'

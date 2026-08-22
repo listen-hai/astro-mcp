@@ -1,6 +1,6 @@
 {
   "name": "@lhk714/astro-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Deterministic modern Western astrology natal-chart MCP server: JPL-Horizons-verified ephemeris, honest degradation when birth time is unknown, Chinese-first output",
   "main": "dist/index.js",
   "type": "module",
@@ -51,5 +51,13 @@
     "@types/bun": "latest",
     "@types/node": "^22.13.0",
     "typescript": "^5.7.3"
+  },
+  "homepage": "https://github.com/listen-hai/astro-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/listen-hai/astro-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/listen-hai/astro-mcp/issues"
   }
 }
