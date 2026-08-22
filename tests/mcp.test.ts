@@ -4,8 +4,8 @@ import { AstroInputObjectSchema } from '../src/schemas/input';
 
 test('exactly five tools are registered', async () => {
   // Was "exactly two" (calculate_natal, lookup_location) until the v2 task
-  // brief (docs/spec.md section 40 defers synastry/transits/retrograde to
-  // v2) added calculate_synastry/calculate_transits/find_retrograde -- see
+  // brief (docs/spec.md section 1 lists synastry/transits/returns as v2
+  // non-goals) added calculate_synastry/calculate_transits/find_retrograde -- see
   // tests/synastry.test.ts, tests/transits.test.ts, tests/retrograde.test.ts.
   // This assertion was left stale by the commit that added those three test
   // files (971f5ca) without updating the tool-count guard here; flagged in
