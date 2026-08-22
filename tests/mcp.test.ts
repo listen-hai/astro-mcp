@@ -54,9 +54,29 @@ test('calculate_natal returns a chart end to end', async () => {
 
 test('lookup_location returns coordinates including latitude', async () => {
   const r = await callTool('lookup_location', { query: 'Los Angeles, CA' });
-  const hits = JSON.parse(r.content[0].text);
-  expect(hits[0].latitude).toBeDefined();
-  expect(hits[0].timezone).toBe('America/Los_Angeles');
+  const payload = JSON.parse(r.content[0].text);
+  expect(payload.results[0].latitude).toBeDefined();
+  expect(payload.results[0].timezone).toBe('America/Los_Angeles');
+  // Shape matches ziwei-mcp/bazi-mcp: one birth record, three charts.
+  expect(payload.query).toBe('Los Angeles, CA');
+  expect(payload.shown).toBe(payload.results.length);
+});
+
+test('lookup_location says when its list is capped, and how many it hid', async () => {
+  // "Santa" matches 37 cities and returns 10. Reporting the returned length
+  // as the count would tell the caller the search was exhaustive.
+  const capped = JSON.parse((await callTool('lookup_location', { query: 'Santa' })).content[0].text);
+  expect(capped.matched).toBeGreaterThan(capped.shown);
+  expect(capped.note).toMatch(/do not assume/i);
+
+  const whole = JSON.parse((await callTool('lookup_location', { query: 'San Jose' })).content[0].text);
+  expect(whole.matched).toBe(whole.shown);
+  expect(whole.note).toBeUndefined();
+});
+
+test('lookup results carry no population -- the prior must not move here either', async () => {
+  const r = await callTool('lookup_location', { query: 'San Jose' });
+  expect(r.content[0].text).not.toMatch(/population/i);
 });
 
 test('output is Chinese by default and English on request', async () => {

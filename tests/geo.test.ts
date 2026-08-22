@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { lookupCity, resolveLocation } from '../src/geo/resolver';
+import { lookupCity, lookupCityWithCount, resolveLocation } from '../src/geo/resolver';
 
 // Tolerance is 0.3 deg: the city-timezones DB stores a municipal centroid, not the
 // landmark coordinate people quote. 0.3 deg of latitude shifts the Ascendant by well
@@ -89,5 +89,40 @@ test('no place name is ever resolved by picking the biggest candidate', () => {
   // odds are still odds.
   for (const place of ['Los Angeles', 'San Jose', 'Springfield', 'Columbus']) {
     expect(() => resolveLocation({ place })).toThrow();
+  }
+});
+
+// ------------------------------------------------- truncation must be shown
+
+test('a truncated candidate list says how many were left out', () => {
+  // "Santa" partial-matches 37 cities. lookupCity keeps 10, the refusal
+  // message showed 5, and neither said so -- the user's actual birthplace can
+  // be among the 32 that vanished, dropped by popularity, silently. Cutting a
+  // list for size is fine; not saying you cut it is a quiet lie about how
+  // complete the answer is.
+  let msg = '';
+  try { resolveLocation({ place: 'Santa' }); } catch (e) { msg = (e as Error).message; }
+  expect(msg).toMatch(/showing \d+ of \d+/i);
+  expect(msg).toMatch(/37|more/i);
+});
+
+test('an untruncated list makes no claim about truncation', () => {
+  let msg = '';
+  try { resolveLocation({ place: 'San Jose' }); } catch (e) { msg = (e as Error).message; }
+  expect(msg).not.toMatch(/showing \d+ of \d+/i);   // all 4 shown; nothing to disclose
+});
+
+test('lookupCity reports the true match count, not just what survived the cap', () => {
+  const { matched, results } = lookupCityWithCount('Santa');
+  expect(results.length).toBeLessThanOrEqual(10);
+  expect(matched).toBeGreaterThan(30);
+});
+
+test('lookup results carry no population -- it is a prior, not an identifier', () => {
+  // Deleting population from the refusal message but leaving it on the query
+  // path just moves the prior: an agent following the recommended
+  // lookup-first flow gets the ranking signal in full.
+  for (const c of lookupCity('San Jose')) {
+    expect('population' in c).toBe(false);
   }
 });

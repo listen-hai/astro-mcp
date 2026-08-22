@@ -19,7 +19,7 @@ import { computeChart } from '../core/chart';
 import { computeSynastry } from '../core/synastry';
 import { computeTransits } from '../core/transits';
 import { findRetrograde } from '../core/retrograde';
-import { lookupCity } from '../geo/resolver';
+import { lookupCity, lookupCityWithCount } from '../geo/resolver';
 import rootPkg from '../../package.json';
 
 /**
@@ -353,8 +353,25 @@ export async function callTool(
   }
   if (name === 'lookup_location') {
     const { query } = LookupLocationSchema.parse(args);
-    const results = lookupCity(query);
-    return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
+    // `matched` is the TRUE number of cities the query hit, not the number
+    // that survived the cap. A capped list that reports its own length as the
+    // count tells the caller the search was exhaustive when it was not --
+    // "Santa" matches 37 cities and returns 10.
+    const { matched, results } = lookupCityWithCount(query);
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          query,
+          matched,
+          shown: results.length,
+          ...(matched > results.length
+            ? { note: `Showing the ${results.length} most populous of ${matched} matches. Narrow the query if none is right -- do not assume the intended city is in this list.` }
+            : {}),
+          results,
+        }, null, 2),
+      }],
+    };
   }
   throw new Error(`Unknown MCP tool: ${name}`);
 }
