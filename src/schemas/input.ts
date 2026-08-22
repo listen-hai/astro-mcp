@@ -19,7 +19,7 @@ export const ASTRO_DEFAULTS = {
   lang: 'zh',
 } as const;
 
-const SolarDateSchema = z
+export const SolarDateSchema = z
   .object({
     year: z
       .number()
@@ -31,7 +31,7 @@ const SolarDateSchema = z
   })
   .strict();
 
-const ClockTimeSchema = z
+export const ClockTimeSchema = z
   .object({
     hour: z.number().int().min(0).max(23),
     minute: z.number().int().min(0).max(59),
@@ -125,3 +125,123 @@ export const LookupLocationSchema = z.object({
 });
 
 export type LookupLocationInput = z.input<typeof LookupLocationSchema>;
+
+// ---------------------------------------------------------------------------
+// v2: synastry, transits, retrograde search
+// ---------------------------------------------------------------------------
+
+/**
+ * The same `place`/`longitude`/`latitude`/`timezone`/`dstFold`/`solarDate`/
+ * `clockTime`(-Range) mutual-exclusion checks `AstroInputSchema` already
+ * applies, factored out so `TransitsInputSchema` below -- which reuses the
+ * exact same flat birth-input fields -- gets identical validation without
+ * duplicating the three predicates.
+ */
+function withBirthFieldRefinements<
+  T extends z.ZodType<{
+    place?: string;
+    longitude?: number;
+    latitude?: number;
+    timezone?: string;
+    clockTime?: unknown;
+    clockTimeRange?: unknown;
+  }>
+>(schema: T) {
+  return schema
+    .refine((v) => !(v.clockTime && v.clockTimeRange), {
+      message: 'Pass at most one of clockTime / clockTimeRange.',
+    })
+    .refine((v) => v.place || (v.longitude !== undefined && v.latitude !== undefined && v.timezone), {
+      message: 'Provide either `place`, or all of `longitude` + `latitude` + `timezone`.',
+    })
+    .refine((v) => !(v.place && (v.longitude !== undefined || v.latitude !== undefined)), {
+      message: 'Pass either `place` or explicit `longitude`+`latitude`+`timezone`, not both. '
+        + 'Latitude drives the Ascendant, so grafting one onto a resolved city would '
+        + 'silently produce a chart for neither location.',
+    });
+}
+
+/**
+ * `calculate_synastry`'s input: two natal charts (each the full natal-input
+ * shape, so `AstroInputSchema`'s own validation applies to both) plus the
+ * house-system/zodiac/node/lilith/orbs/lang convention switches, which apply
+ * to BOTH charts and are reported once at the top level (spec: "口径开关...
+ * 只在顶层 diagnostics 报一次") -- reused directly off `AstroInputObjectSchema`'s
+ * own field definitions so the two tools cannot drift apart.
+ */
+export const SynastryInputSchema = z
+  .object({
+    personA: AstroInputObjectSchema.describe("Person A's birth data (same shape as calculate_natal's input)"),
+    personB: AstroInputObjectSchema.describe("Person B's birth data (same shape as calculate_natal's input)"),
+    houseSystem: AstroInputObjectSchema.shape.houseSystem,
+    zodiac: AstroInputObjectSchema.shape.zodiac,
+    node: AstroInputObjectSchema.shape.node,
+    lilith: AstroInputObjectSchema.shape.lilith,
+    orbs: AstroInputObjectSchema.shape.orbs,
+    minorAspects: AstroInputObjectSchema.shape.minorAspects,
+    declinationAspects: AstroInputObjectSchema.shape.declinationAspects,
+    asteroids: AstroInputObjectSchema.shape.asteroids,
+    chiron: AstroInputObjectSchema.shape.chiron,
+    lang: AstroInputObjectSchema.shape.lang,
+  })
+  .strict()
+  .superRefine((v, ctx) => {
+    for (const key of ['personA', 'personB'] as const) {
+      const result = AstroInputSchema.safeParse(v[key]);
+      if (!result.success) {
+        for (const issue of result.error.issues) ctx.addIssue({ ...issue, path: [key, ...issue.path] });
+      }
+    }
+  });
+
+export type SynastryInput = z.input<typeof SynastryInputSchema>;
+
+const TransitTargetSchema = z
+  .object({
+    solarDate: SolarDateSchema.describe('Solar (Gregorian) target date'),
+    clockTime: ClockTimeSchema.describe('Clock time of the target instant'),
+    dstFold: z
+      .union([z.literal(0), z.literal(1)])
+      .optional()
+      .describe('DST fall-back disambiguation for the target instant'),
+  })
+  .strict();
+
+/**
+ * `calculate_transits`'s input: the exact same flat natal-input contract as
+ * `calculate_natal` (so a Western chart and its transits stay aligned for
+ * the same birth data) plus an optional `target` -- the instant to compute
+ * the transiting sky for. Omitting it defaults to "now".
+ */
+export const TransitsInputSchema = withBirthFieldRefinements(
+  AstroInputObjectSchema.extend({
+    target: TransitTargetSchema.optional().describe(
+      'The instant to compute the transiting sky for. Omit entirely to default to the current instant ("now").'
+    ),
+  }).strict()
+);
+
+export type TransitsInput = z.input<typeof TransitsInputSchema>;
+
+const RETROGRADE_BODY_VALUES = [
+  'Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto',
+] as const;
+
+/**
+ * `find_retrograde`'s input: no birth data at all -- just a body and a
+ * calendar window (spec soul: this is the one v2 tool with nothing to
+ * degrade). Sun/Moon are accepted here and rejected with a specific message
+ * by `findRetrograde` itself (see src/core/retrograde.ts) rather than by the
+ * schema, so a caller gets "Sun/Moon never retrograde" instead of a generic
+ * enum-mismatch error.
+ */
+export const RetrogradeInputSchema = z
+  .object({
+    body: z.enum(RETROGRADE_BODY_VALUES).describe('Which body to search for retrograde periods'),
+    from: SolarDateSchema.describe('Start of the search window (inclusive)'),
+    to: SolarDateSchema.describe('End of the search window (inclusive)'),
+    lang: z.enum(['zh', 'en']).default('zh'),
+  })
+  .strict();
+
+export type RetrogradeInput = z.input<typeof RetrogradeInputSchema>;
