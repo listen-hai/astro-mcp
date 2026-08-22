@@ -1,6 +1,8 @@
 # Astro MCP (`@lhk714/astro-mcp`)
 
+[![npm version](https://img.shields.io/npm/v/@lhk714/astro-mcp.svg)](https://www.npmjs.com/package/@lhk714/astro-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/listen-hai/astro-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/listen-hai/astro-mcp/actions/workflows/ci.yml)
 [![Bun](https://img.shields.io/badge/runtime-Bun%20%7C%20Node-black.svg)]()
 
 > Deterministic modern Western astrology natal-chart Model Context Protocol (MCP) server: an `astronomy-engine` ephemeris verified against JPL Horizons, honest degradation when the birth time is unknown, and Chinese-first output.
@@ -145,7 +147,7 @@ The Sun and Moon are refused outright — "Sun/Moon never retrograde" — rather
 
 ### 5. `lookup_location`
 
-Resolves an English city name to longitude, latitude, and IANA timezone across 7,329 cities in 227 countries — the same database `ziwei-mcp`/`bazi-mcp` use. Same-named cities in different timezones (e.g. Springfield, or Cambridge UK vs Cambridge MA) are refused with the candidate list rather than guessed — **except** when one candidate's population dominates the other by 10x or more (e.g. "Los Angeles" resolves straight to the ~8.1M-population California city over a same-named ~135k-population town in Chile's Bío-Bío region); that dominance is reported in `mixedWarning` rather than applied silently.
+Resolves an English city name to longitude, latitude, and IANA timezone across 7,329 cities in 227 countries — the same database `ziwei-mcp`/`bazi-mcp` use. **Same-named cities are refused with the candidate list, never guessed** — not at a 60× population gap ("Los Angeles", California vs Chile's Bío-Bío region), and not when they share a timezone (Columbus OH and GA are both `America/New_York`, 7.5° of latitude apart, which moves the Ascendant outright). Entries at genuinely identical coordinates still resolve — Kansas City MO and KS are adjacent and share a data point, and recognising that two records describe one location is a fact about the data, not a guess about intent. See [Refusals are a contract](#-refusals-are-a-contract-not-prose).
 
 ---
 
@@ -207,7 +209,7 @@ The true lunar node is independently self-checked against `astronomy-engine`'s o
 
 ## 🧭 Sibling servers: `ziwei-mcp` / `bazi-mcp`
 
-This project does not calculate Zi Wei Dou Shu or Bazi (四柱/八字) — use [`@lhk714/ziwei-mcp`](https://github.com/listen-hai/ziwei-mcp) or [`@lhk714/bazi-mcp`](https://github.com/listen-hai/bazi-mcp) for those.
+This project does not calculate Zi Wei Dou Shu or Bazi (四柱/八字) — use [`@lhk714/ziwei-mcp`](https://www.npmjs.com/package/@lhk714/ziwei-mcp) ([source](https://github.com/listen-hai/ziwei-mcp)) or [`@lhk714/bazi-mcp`](https://www.npmjs.com/package/@lhk714/bazi-mcp) ([source](https://github.com/listen-hai/bazi-mcp)) for those.
 
 The shared birth-input fields (`place`, `longitude`, `timezone`, `dstFold`, `solarDate`, `clockTime`) and the geographic-resolution layer (`lookup_location`) are deliberately identical across all three servers, so a request built from the same birth data resolves to the same UTC instant and the same location in every one of them — a Western, Zi Wei, and Bazi chart for one person stay aligned. `latitude` is the one field this project adds beyond the shared contract: Western astrology's Ascendant and houses need it, and neither sibling does.
 

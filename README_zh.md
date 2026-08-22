@@ -1,6 +1,8 @@
 # Astro MCP (`@lhk714/astro-mcp`)
 
+[![npm version](https://img.shields.io/npm/v/@lhk714/astro-mcp.svg)](https://www.npmjs.com/package/@lhk714/astro-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/listen-hai/astro-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/listen-hai/astro-mcp/actions/workflows/ci.yml)
 [![Bun](https://img.shields.io/badge/runtime-Bun%20%7C%20Node-black.svg)]()
 
 > 确定性的现代西洋占星本命盘 Model Context Protocol (MCP) server：基于 `astronomy-engine` 星历、逐项对拍 JPL Horizons、出生时间未知时诚实降级而非伪造、默认中文输出。
@@ -143,7 +145,7 @@ npx -y @lhk714/astro-mcp@latest
 
 ### 5. `lookup_location`
 
-将英文城市名解析为经度、纬度与 IANA 时区，覆盖 227 个国家的 7,329 座城市——与 `ziwei-mcp`/`bazi-mcp` 使用同一数据库。不同时区的同名城市（如 Springfield，或英国剑桥 vs 美国剑桥）会拒绝并列出候选列表，而不是随意猜一个——**除非**某个候选的人口数量级压倒性超过另一个（≥10 倍，例如 "Los Angeles" 会直接解析到人口约 810 万的加州城市，而不是智利 Bío-Bío 大区一个同名、人口约 13.5 万的小镇）；这种情况下会在 `mixedWarning` 中明确说明，而非静默处理。
+将英文城市名解析为经度、纬度与 IANA 时区，覆盖 227 个国家的 7,329 座城市——与 `ziwei-mcp`/`bazi-mcp` 使用同一数据库。**同名城市一律拒绝并列出候选，绝不猜测**——人口差 60 倍也不猜（"Los Angeles"，加州 vs 智利 Bío-Bío），共享时区也不猜（Columbus 的俄亥俄与佐治亚同为 `America/New_York`，但纬度差 7.5°，上升点直接移位）。坐标确实相同的条目照常解析——Kansas City 的 MO 与 KS 相邻、库里是同一个点，认出「两条记录是同一个地点」是关于数据的事实判断，不是关于用户意图的猜测。详见 [拒绝是契约](#-拒绝是契约不是散文)。
 
 ---
 
@@ -190,7 +192,7 @@ npx -y @lhk714/astro-mcp@latest
 
 ## 🧭 姊妹项目：`ziwei-mcp` / `bazi-mcp`
 
-本项目不计算紫微斗数或八字（四柱），需要请使用 [`@lhk714/ziwei-mcp`](https://github.com/listen-hai/ziwei-mcp) 或 [`@lhk714/bazi-mcp`](https://github.com/listen-hai/bazi-mcp)。
+本项目不计算紫微斗数或八字（四柱），需要请使用 [`@lhk714/ziwei-mcp`](https://www.npmjs.com/package/@lhk714/ziwei-mcp)（[源码](https://github.com/listen-hai/ziwei-mcp)）或 [`@lhk714/bazi-mcp`](https://www.npmjs.com/package/@lhk714/bazi-mcp)（[源码](https://github.com/listen-hai/bazi-mcp)）。
 
 共有的出生输入字段（`place`、`longitude`、`timezone`、`dstFold`、`solarDate`、`clockTime`）与地理解析层（`lookup_location`）在三个 server 之间刻意保持一致，因此用同一份出生数据分别请求三者，会解析到同一个 UTC 瞬时与同一个地理位置——同一个人的西洋、紫微、八字三张盘因此天然对齐。`latitude` 是本项目在共有契约之外新增的唯一字段：西洋占星的上升点与宫位需要纬度，另外两个姊妹项目不需要。
 
