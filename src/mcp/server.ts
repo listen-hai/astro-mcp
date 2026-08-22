@@ -19,8 +19,33 @@ import { computeChart } from '../core/chart';
 import { computeSynastry } from '../core/synastry';
 import { computeTransits } from '../core/transits';
 import { findRetrograde } from '../core/retrograde';
-import { lookupCity, lookupCityWithCount } from '../geo/resolver';
+import { lookupCity, lookupCityWithCount, LocationError } from '../geo/resolver';
 import rootPkg from '../../package.json';
+
+// case a single issue's own message is huge (e.g. a long echoed value).
+const MAX_REPORTED_ISSUES = 8;
+const MAX_ERROR_MESSAGE_LENGTH = 4000;
+
+// Zod issue paths are dropped here in the old code, so the LLM caller sees a bare
+// "Required" or "Expected number, received string" with no field name — even
+// though the path (e.g. ["solarDate", "day"]) is right there on the issue. Prefix
+// it when present. The hand-written `.strict().refine(...)` messages in
+// schemas/input.ts (e.g. "Must provide either solarDate or lunarDate.") attach to
+// the whole object and carry an empty path — leave those bare rather than
+// prefixing a stray ": " separator onto an already-readable sentence.
+export function formatZodError(err: z.ZodError): string {
+  const formatted = err.issues.map(i =>
+    i.path.length > 0 ? `${i.path.join('.')}: ${i.message}` : i.message
+  );
+  const shown = formatted.slice(0, MAX_REPORTED_ISSUES);
+  const omitted = formatted.length - shown.length;
+  let msg = shown.join('; ');
+  if (omitted > 0) msg += `; …and ${omitted} more validation errors`;
+  if (msg.length > MAX_ERROR_MESSAGE_LENGTH) {
+    msg = `${msg.slice(0, MAX_ERROR_MESSAGE_LENGTH)}… (truncated)`;
+  }
+  return msg;
+}
 
 /**
  * Derives JSON-Schema `default`/`minimum`/`maximum` from the zod schema
@@ -100,7 +125,7 @@ const CLOCK_TIME_PROPERTY = {
 const natalPropertiesRaw: Record<string, object> = {
   place: {
     type: 'string',
-    description: 'Birth city name in ENGLISH (e.g. "Beijing", "New York", "Tacoma, WA"). Translate from other languages before passing.',
+    description: 'Birth city name in ENGLISH (e.g. "Beijing", "New York", "Tacoma, WA"). Translate from other languages before passing. Same-name cities are REFUSED, never guessed: the result carries `code: "ambiguous_place"` and a `candidates` list. Settle it BEFORE charting -- call lookup_location first, or pass "City, Province/Country" (e.g. "Los Angeles, CA").',
   },
   longitude: {
     type: 'number',
@@ -308,7 +333,7 @@ const TOOLS: Tool[] = [
   {
     name: 'lookup_location',
     description:
-      'Looks up a city\'s geographic coordinates (longitude, latitude) and IANA timezone. IMPORTANT: use ENGLISH city names; translate first if given another language (e.g. 东京 -> "Tokyo", 巴黎 -> "Paris"). Covers 7,329 cities across 227 countries -- the same database used by ziwei-mcp/bazi-mcp\'s own lookup_location.',
+      'Looks up a city\'s geographic coordinates (longitude, latitude) and IANA timezone. Use this BEFORE a chart tool whenever the place name might be ambiguous -- it is cheaper than a refused chart call. IMPORTANT: use ENGLISH city names; translate first if given another language (e.g. 东京 -> "Tokyo", 巴黎 -> "Paris"). When more than one city comes back, ASK the user which one they mean -- do not pick the first, the largest, or the most likely one. The response reports `matched` (true hit count) and `shown` (after the cap), so a capped list never reads as exhaustive. Covers 7,329 cities across 227 countries -- the same database used by ziwei-mcp/bazi-mcp\'s own lookup_location.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -327,10 +352,29 @@ export async function listTools(): Promise<Tool[]> {
   return TOOLS;
 }
 
-export async function callTool(
+type ToolResult = { content: { type: 'text'; text: string }[]; isError?: true };
+
+/**
+ * An ambiguous or unknown birth place is not an exception -- it is a normal
+ * outcome the agent is expected to handle by asking the user. So it comes back
+ * as a structured `isError` result rather than a thrown Error, which is what a
+ * schema violation (a contract breach by the caller) still is.
+ */
+export async function callTool(name: string, args: unknown): Promise<ToolResult> {
+  try {
+    return await dispatchTool(name, args);
+  } catch (err) {
+    if (err instanceof LocationError) {
+      return { isError: true, content: [{ type: 'text', text: JSON.stringify(err.toPayload(), null, 2) }] };
+    }
+    throw err;
+  }
+}
+
+async function dispatchTool(
   name: string,
   args: unknown
-): Promise<{ content: { type: 'text'; text: string }[] }> {
+): Promise<ToolResult> {
   if (name === 'calculate_natal') {
     const input = AstroInputSchema.parse(args);
     const chart = computeChart(input);
@@ -389,8 +433,15 @@ export function createAstroMcpServer(): Server {
     try {
       return await callTool(name, args);
     } catch (err: unknown) {
+      // A location refusal ships its candidate list as JSON rather than prose.
+      // The agent should not have to parse English to find out which cities
+      // matched; `code` is stable enough to branch on, and `matched` keeps a
+      // capped list from reading as an exhaustive one.
+      if (err instanceof LocationError) {
+        return { isError: true, content: [{ type: 'text', text: JSON.stringify(err.toPayload(), null, 2) }] };
+      }
       const message = err instanceof z.ZodError
-        ? err.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ')
+        ? formatZodError(err)
         : err instanceof Error ? err.message : String(err);
       return { isError: true, content: [{ type: 'text', text: `[Astro Calculation Error] ${message}` }] };
     }
