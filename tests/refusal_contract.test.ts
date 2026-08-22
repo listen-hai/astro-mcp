@@ -65,3 +65,23 @@ test('lookup_location tells the agent to ASK rather than pick', async () => {
   expect(lookup.description).toMatch(/do not (pick|choose|assume)/i);
   expect(lookup.description).toMatch(/before/i);
 });
+
+// ------------------------------------------- the last mile: presentation
+
+test('the chart tools tell the agent not to collapse disclosed uncertainty', async () => {
+  // Everything this server does to report uncertainty honestly is undone if
+  // the model reading the JSON narrates "your Ascendant is Sagittarius" from
+  // a candidate list. An LLM collapsing `["射手","摩羯"]` into one value costs
+  // it nothing -- fluent, confident prose is the default. The instruction has
+  // to be in the tool description, where the model actually reads it.
+  for (const name of ['calculate_natal', 'calculate_synastry', 'calculate_transits']) {
+    const tool = (await listTools()).find((t) => t.name === name)!;
+    expect(tool.description).toMatch(/candidate/i);
+    expect(tool.description).toMatch(/do not (pick|choose|collapse)|present (all|both)|report (all|both)/i);
+  }
+});
+
+test('omitted fields are explained as omitted, not silently missing', async () => {
+  const natal = (await listTools()).find((t) => t.name === 'calculate_natal')!;
+  expect(natal.description).toMatch(/diagnostics\.omitted/);
+});
