@@ -2,9 +2,17 @@ import { expect, test } from 'bun:test';
 import { listTools, callTool } from '../src/mcp/server';
 import { AstroInputObjectSchema } from '../src/schemas/input';
 
-test('exactly two tools are registered', async () => {
+test('exactly five tools are registered', async () => {
+  // Was "exactly two" (calculate_natal, lookup_location) until the v2 task
+  // brief (docs/spec.md section 40 defers synastry/transits/retrograde to
+  // v2) added calculate_synastry/calculate_transits/find_retrograde -- see
+  // tests/synastry.test.ts, tests/transits.test.ts, tests/retrograde.test.ts.
+  // This assertion was left stale by the commit that added those three test
+  // files (971f5ca) without updating the tool-count guard here; flagged in
+  // the v2 implementation report per this project's own "stop and say so"
+  // convention rather than silently reinterpreted.
   expect((await listTools()).map((t) => t.name).sort())
-    .toEqual(['calculate_natal', 'lookup_location']);
+    .toEqual(['calculate_natal', 'calculate_synastry', 'calculate_transits', 'find_retrograde', 'lookup_location']);
 });
 
 test('the advertised JSON Schema must not drift from the zod schema', async () => {
