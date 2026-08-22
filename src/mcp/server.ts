@@ -6,8 +6,18 @@ import {
   ListToolsRequestSchema,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
-import { AstroInputSchema, AstroInputObjectSchema, LookupLocationSchema } from '../schemas/input';
+import {
+  AstroInputSchema,
+  AstroInputObjectSchema,
+  LookupLocationSchema,
+  SynastryInputSchema,
+  TransitsInputSchema,
+  RetrogradeInputSchema,
+} from '../schemas/input';
 import { computeChart } from '../core/chart';
+import { computeSynastry } from '../core/synastry';
+import { computeTransits } from '../core/transits';
+import { findRetrograde } from '../core/retrograde';
 import { lookupCity } from '../geo/resolver';
 import rootPkg from '../../package.json';
 
@@ -185,6 +195,60 @@ const natalProperties: Record<string, object> = Object.fromEntries(
   Object.entries(natalPropertiesRaw).map(([field, prop]) => [field, withZodConstraints(inputZodShape[field], prop)])
 );
 
+// ---------------------------------------------------------------------------
+// v2: synastry, transits, retrograde -- properties reused from natalProperties
+// wherever the field is literally the same zod definition, so the advertised
+// schema for these three tools cannot drift from calculate_natal's own
+// fields any more than calculate_natal's own schema can drift from its zod.
+// ---------------------------------------------------------------------------
+
+const SYNASTRY_CONVENTION_KEYS = [
+  'houseSystem', 'zodiac', 'node', 'lilith', 'orbs',
+  'minorAspects', 'declinationAspects', 'asteroids', 'chiron', 'lang',
+] as const;
+
+const personProperty = (label: 'A' | 'B'): object => ({
+  type: 'object',
+  description: `Person ${label}'s birth data -- identical shape to calculate_natal's own input, including its unknown-birth-time behavior.`,
+  additionalProperties: false,
+  properties: { ...natalProperties },
+  required: ['solarDate'],
+});
+
+const synastryProperties: Record<string, object> = {
+  personA: personProperty('A'),
+  personB: personProperty('B'),
+  ...Object.fromEntries(SYNASTRY_CONVENTION_KEYS.map((k) => [k, natalProperties[k]])),
+};
+
+const transitTargetProperty: object = {
+  type: 'object',
+  additionalProperties: false,
+  description: 'The instant to compute the transiting sky for. Omit entirely to default to the current instant ("now") -- see diagnostics.targetSource/targetUtc. If provided, both solarDate and clockTime are required together.',
+  properties: {
+    solarDate: natalProperties.solarDate,
+    clockTime: natalProperties.clockTime,
+    dstFold: natalProperties.dstFold,
+  },
+  required: ['solarDate', 'clockTime'],
+};
+
+const transitsProperties: Record<string, object> = {
+  ...natalProperties,
+  target: transitTargetProperty,
+};
+
+const retrogradeProperties: Record<string, object> = {
+  body: {
+    type: 'string',
+    enum: ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'],
+    description: 'Which body to search for retrograde periods. Sun/Moon are valid values here but are refused by the tool itself with an explicit "never retrograde" error, not a generic schema mismatch.',
+  },
+  from: { ...(natalProperties.solarDate as object), description: 'Start of the search window (inclusive)' },
+  to: { ...(natalProperties.solarDate as object), description: 'End of the search window (inclusive), at most 5 years after `from`' },
+  lang: natalProperties.lang,
+};
+
 const TOOLS: Tool[] = [
   {
     name: 'calculate_natal',
@@ -196,6 +260,42 @@ const TOOLS: Tool[] = [
       type: 'object',
       properties: { ...natalProperties },
       required: ['solarDate'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'calculate_synastry',
+    description:
+      'Synastry (合盘): aspects and house overlays BETWEEN two natal charts, `personA` and `personB` -- this is a comparison, not a single natal chart (call calculate_natal for that). Both people accept the exact same birth-input contract as calculate_natal, including its unknown-birth-time behavior (NEVER fabricates a birth time). The convention switches (houseSystem/zodiac/node/lilith/orbs/minorAspects/declinationAspects/asteroids/chiron/lang) apply to BOTH charts and are reported once, in the top-level `diagnostics` -- not per person. '
+      + 'House overlays are DIRECTIONAL: `overlays.aInB` places A\'s bodies into B\'s houses, which needs B to have an exact birth time (so B\'s twelve houses exist); `overlays.bInA` is the reverse. If either side\'s time is unknown, only the overlay that needed THAT side\'s houses is omitted (see `diagnostics.omitted`) -- the other direction still returns normally. Ascendant/Midheaven aspects only exist for whichever side has an exact time. Any aspect touching a Moon on an unknown-time side is flagged `uncertain: true` (the Moon moves 12-15 deg/day). `applying` is never included in the aspect list -- two natal charts are each frozen at their own birth instant, so "approaching exactness" across two different epochs is not a meaningful thing to report.',
+    inputSchema: {
+      type: 'object',
+      properties: { ...synastryProperties },
+      required: ['personA', 'personB'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'calculate_transits',
+    description:
+      'Transits (行运): where the sky stands RIGHT NOW (or at any given instant) against a natal chart. Takes the exact same flat birth-input fields as calculate_natal (place/longitude/latitude/timezone/dstFold/solarDate/clockTime(-Range)) plus an optional `target`: the instant to compute the transiting sky for (`target.solarDate` and `target.clockTime` are both required together if `target` is given at all). Omitting `target` entirely defaults to the current instant ("now") -- see `diagnostics.targetSource`/`diagnostics.targetUtc`. A `target` before the birth instant is rejected: a transit only makes sense against a chart that already exists. '
+      + 'The transiting sky is always exact (the target instant is always known) -- ALL degradation is on the NATAL side. If the natal birth time is unknown, `transiting[].natalHouse` is OMITTED from every entry (not null; see `diagnostics.omitted`) and aspects to the natal Ascendant/Midheaven are absent, but planet-to-planet aspects to the natal chart still work -- any surviving aspect touching the natal Moon is flagged `uncertain: true` (the Moon moves 12-15 deg/day, so an imprecise birth time means an imprecise natal Moon).',
+    inputSchema: {
+      type: 'object',
+      properties: { ...transitsProperties },
+      required: ['solarDate'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'find_retrograde',
+    description:
+      'Finds retrograde periods for one body within a calendar window (up to 5 years) -- no birth data needed at all, this is a pure ephemeris lookup (e.g. "水星逆行", Mercury retrograde, by far the most widely recognised astrology concept in Chinese online culture). Each period reports its exact station-retrograde/station-direct instants (`startsUtc`/`endsUtc`, ISO 8601 UTC) and the zodiac sign the retrograde begins in (`startSign`). '
+      + 'The Sun and Moon are refused outright with an explicit "never retrograde" error (apparent retrograde motion is an artifact of viewing another planet from a moving Earth; the Sun and Moon have no such effect) rather than silently returning an empty period list, which would read as "not retrograde this window" instead of "this concept does not apply". A window longer than 5 years is refused rather than grinding through a slow day-by-day scan -- split it into smaller windows instead.',
+    inputSchema: {
+      type: 'object',
+      properties: { ...retrogradeProperties },
+      required: ['body', 'from', 'to'],
       additionalProperties: false,
     },
   },
@@ -229,6 +329,21 @@ export async function callTool(
     const input = AstroInputSchema.parse(args);
     const chart = computeChart(input);
     return { content: [{ type: 'text', text: JSON.stringify(chart, null, 2) }] };
+  }
+  if (name === 'calculate_synastry') {
+    const input = SynastryInputSchema.parse(args);
+    const result = computeSynastry(input);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+  if (name === 'calculate_transits') {
+    const input = TransitsInputSchema.parse(args);
+    const result = computeTransits(input);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+  if (name === 'find_retrograde') {
+    const input = RetrogradeInputSchema.parse(args);
+    const result = findRetrograde(input);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   }
   if (name === 'lookup_location') {
     const { query } = LookupLocationSchema.parse(args);

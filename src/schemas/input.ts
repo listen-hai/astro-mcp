@@ -131,37 +131,6 @@ export type LookupLocationInput = z.input<typeof LookupLocationSchema>;
 // ---------------------------------------------------------------------------
 
 /**
- * The same `place`/`longitude`/`latitude`/`timezone`/`dstFold`/`solarDate`/
- * `clockTime`(-Range) mutual-exclusion checks `AstroInputSchema` already
- * applies, factored out so `TransitsInputSchema` below -- which reuses the
- * exact same flat birth-input fields -- gets identical validation without
- * duplicating the three predicates.
- */
-function withBirthFieldRefinements<
-  T extends z.ZodType<{
-    place?: string;
-    longitude?: number;
-    latitude?: number;
-    timezone?: string;
-    clockTime?: unknown;
-    clockTimeRange?: unknown;
-  }>
->(schema: T) {
-  return schema
-    .refine((v) => !(v.clockTime && v.clockTimeRange), {
-      message: 'Pass at most one of clockTime / clockTimeRange.',
-    })
-    .refine((v) => v.place || (v.longitude !== undefined && v.latitude !== undefined && v.timezone), {
-      message: 'Provide either `place`, or all of `longitude` + `latitude` + `timezone`.',
-    })
-    .refine((v) => !(v.place && (v.longitude !== undefined || v.latitude !== undefined)), {
-      message: 'Pass either `place` or explicit `longitude`+`latitude`+`timezone`, not both. '
-        + 'Latitude drives the Ascendant, so grafting one onto a resolved city would '
-        + 'silently produce a chart for neither location.',
-    });
-}
-
-/**
  * `calculate_synastry`'s input: two natal charts (each the full natal-input
  * shape, so `AstroInputSchema`'s own validation applies to both) plus the
  * house-system/zodiac/node/lilith/orbs/lang convention switches, which apply
@@ -194,7 +163,7 @@ export const SynastryInputSchema = z
     }
   });
 
-export type SynastryInput = z.input<typeof SynastryInputSchema>;
+export type SynastryInput = z.infer<typeof SynastryInputSchema>;
 
 const TransitTargetSchema = z
   .object({
@@ -211,17 +180,31 @@ const TransitTargetSchema = z
  * `calculate_transits`'s input: the exact same flat natal-input contract as
  * `calculate_natal` (so a Western chart and its transits stay aligned for
  * the same birth data) plus an optional `target` -- the instant to compute
- * the transiting sky for. Omitting it defaults to "now".
+ * the transiting sky for. Omitting it defaults to "now". Reuses
+ * `AstroInputObjectSchema`'s own three mutual-exclusion/location refinements
+ * (rather than `AstroInputSchema`, whose refinements are already baked into a
+ * `ZodEffects` with no `.extend()`) so this schema gets identical validation
+ * to `calculate_natal` without duplicating the natal object shape.
  */
-export const TransitsInputSchema = withBirthFieldRefinements(
-  AstroInputObjectSchema.extend({
-    target: TransitTargetSchema.optional().describe(
-      'The instant to compute the transiting sky for. Omit entirely to default to the current instant ("now").'
-    ),
-  }).strict()
-);
+export const TransitsInputSchema = AstroInputObjectSchema.extend({
+  target: TransitTargetSchema.optional().describe(
+    'The instant to compute the transiting sky for. Omit entirely to default to the current instant ("now").'
+  ),
+})
+  .strict()
+  .refine((v) => !(v.clockTime && v.clockTimeRange), {
+    message: 'Pass at most one of clockTime / clockTimeRange.',
+  })
+  .refine((v) => v.place || (v.longitude !== undefined && v.latitude !== undefined && v.timezone), {
+    message: 'Provide either `place`, or all of `longitude` + `latitude` + `timezone`.',
+  })
+  .refine((v) => !(v.place && (v.longitude !== undefined || v.latitude !== undefined)), {
+    message: 'Pass either `place` or explicit `longitude`+`latitude`+`timezone`, not both. '
+      + 'Latitude drives the Ascendant, so grafting one onto a resolved city would '
+      + 'silently produce a chart for neither location.',
+  });
 
-export type TransitsInput = z.input<typeof TransitsInputSchema>;
+export type TransitsInput = z.infer<typeof TransitsInputSchema>;
 
 const RETROGRADE_BODY_VALUES = [
   'Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto',
@@ -244,4 +227,4 @@ export const RetrogradeInputSchema = z
   })
   .strict();
 
-export type RetrogradeInput = z.input<typeof RetrogradeInputSchema>;
+export type RetrogradeInput = z.infer<typeof RetrogradeInputSchema>;
