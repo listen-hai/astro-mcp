@@ -37,6 +37,18 @@ interface Seed {
 // epoch. Starting from the nearest one caps the integration distance at 10
 // years instead of up to 100 -- roughly 10x fewer GravitySimulator steps,
 // and shorter integration is also more accurate.
+/**
+ * Exported for tests: the gap, in years, between a date and the seed epoch the
+ * integration will actually start from. This is the property that matters --
+ * integrating a 1900 chart all the way from J2000 was the original 4.7 s bug,
+ * and a timing assertion cannot pin it down portably (CI hardware varies too
+ * much). The integration distance is hardware-independent and IS the defect.
+ */
+export function integrationSpanYears(name: string, date: Date): number {
+  const { ref } = nearestEpochOf(name, date);
+  return Math.abs(date.getTime() - ref.date.getTime()) / (365.25 * 86400000);
+}
+
 function nearestEpochOf(name: string, date: Date): { ref: AstronomyImport.AstroTime; seed: Seed } {
   const epochs = (seedsData as unknown as Record<string, Record<string, Seed>>)[name];
   if (!epochs) throw new Error(`No JPL seed for small body "${name}". Known bodies: ${SMALL_BODIES.join(', ')}`);
