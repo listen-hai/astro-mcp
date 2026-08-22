@@ -147,6 +147,27 @@ npx -y @lhk714/astro-mcp@latest
 
 ---
 
+
+## 🚫 拒绝是契约，不是散文
+
+地点歧义不是异常——它是调用方 agent 预期要处理的正常结果（去问用户）。所以它以结构化的 `isError` 结果返回，而不是抛出错误，**agent 无需解析英文**就能知道匹配到了什么：
+
+```jsonc
+{
+  "code": "ambiguous_place",   // 另有 unknown_place、incomplete_coordinates
+  "message": "…",              // 仍然可读，服务于人和 LLM
+  "matched": 4,                // 真实命中数，截断的列表不会被误读为穷举
+  "candidates": [ { "name": "San Jose", "province": "California", "country": "US",
+                    "latitude": 37.3, "longitude": -121.85, "timezone": "America/Los_Angeles" } ]
+}
+```
+
+同名城市**永不靠"挑可能的那个"解析**——即使人口差 60 倍（Los Angeles，美国 vs 智利），即使它们共享时区（Columbus 的俄亥俄与佐治亚同为 `America/New_York`，但纬度差 7.5°，上升点直接移位）。坐标确实相同的条目照常解析：认出「两条记录是同一个地点」是关于数据的事实判断，不是关于用户意图的猜测。
+
+候选只带识别字段。**人口是刻意不给的**——没人靠人口认出自己的出生地，它是「哪个更可能」的先验；把它放出来等于把本服务器拒绝做的猜测搬进 agent 的提示，让中性的「俄亥俄还是佐治亚？」变成「俄亥俄那个吧？」。
+
+地名可能有歧义时先调 `lookup_location`——那比一次被拒绝的排盘调用便宜。
+
 ## 📏 精度
 
 对 JPL Horizons（`QUANTITIES=31`，含光行时修正）实测，覆盖 1900–2050–2100：

@@ -164,6 +164,27 @@ tag, so it would publish whatever happens to sit on the branch. It authenticates
 through npm's OIDC trusted publishing rather than a long-lived `NPM_TOKEN`, so
 there is no secret to rotate or leak, and provenance is attached automatically.
 
+
+## 🚫 Refusals are a contract, not prose
+
+An ambiguous birth place is not an exception — it is a normal outcome the calling agent is expected to handle by asking the user. So it comes back as a structured `isError` result rather than a thrown error, and the agent never has to parse English to find out what matched:
+
+```jsonc
+{
+  "code": "ambiguous_place",   // also: unknown_place, incomplete_coordinates
+  "message": "…",              // still readable, for a human or an LLM
+  "matched": 4,                // TRUE hit count, so a capped list never reads as exhaustive
+  "candidates": [ { "name": "San Jose", "province": "California", "country": "US",
+                    "latitude": 37.3, "longitude": -121.85, "timezone": "America/Los_Angeles" } ]
+}
+```
+
+Same-name cities are never resolved by picking the likely one — not even at a 60× population gap ("Los Angeles", US vs Chile), and not even when they share a timezone (Columbus OH and GA are both `America/New_York` but 7.5° of latitude apart, which moves the Ascendant outright). Entries at genuinely identical coordinates still resolve: recognising that two records describe one location is a fact about the data, not a guess about intent.
+
+Candidates carry identifying fields only. **Population is deliberately absent** — nobody knows their birthplace by its population; it is a likelihood prior, and publishing it would move the guess this server refuses to make into the agent's prompt, turning a neutral "Ohio or Georgia?" into "Ohio, right?".
+
+Call `lookup_location` first when a name might be ambiguous; it is cheaper than a refused chart call.
+
 ## 📏 Accuracy
 
 Measured against JPL Horizons (`QUANTITIES=31`, light-time-corrected), across 1900–2050–2100:
