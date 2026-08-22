@@ -114,7 +114,7 @@ Requires `solarDate` and a location (`place`, or `longitude` + `latitude` + `tim
 | `lilith` | `"mean"` (mean lunar apogee) | `"true"` (osculating apogee) | Popular astrology's convention; `"true"` is a minority choice. |
 | `minorAspects` | `false` | `true` | Only the five majors (conjunction/sextile/square/trine/opposition) by default. |
 | `declinationAspects` | `false` | `true` | Minority convention — and the exact spot where `auseklis` fabricated results from a hard-coded zero declination. Enabling it uses real ecliptic-latitude-derived declination. |
-| Orbs | conjunction/opposition 8°, square/trine 7°, sextile 6°, minors 2–3° | `orbs` parameter, keyed by aspect name | Modern convention: orbs keyed to **aspect type**, not to each body's own light (classical moiety). Not exposed as a parameter yet — see Known limitations. |
+| Orbs | conjunction/opposition 8°, square/trine 7°, sextile 6°, minors 2–3° | `orbs` parameter, keyed by aspect name | Modern convention: orbs keyed to **aspect type**, not to each body's own light (classical moiety). Override any of them per request; the table actually applied comes back in `diagnostics.orbs`. |
 | `chiron` | `true` | `false` | On by default: standard in modern psychological astrology, with real usage in Chinese social media. |
 | `asteroids` | `false` | `true` (adds Ceres/Pallas/Juno/Vesta) | Off by default: low mainstream usage; kept behind one flag since it shares Chiron's own code path. |
 | Essential dignity | domicile/exaltation/detriment/fall only | — | The four dignities modern astrology kept from classical technique. Triplicity/term/face are **not** implemented (out of scope, see §0). Outer-planet rulerships (Uranus→Aquarius, Neptune→Pisces, Pluto→Scorpio) are a modern convention with no classical consensus, and are marked `modern: true` in the output so a caller can tell them apart from the classical seven-planet assignments. |
@@ -184,7 +184,7 @@ What is **not** shared, on purpose: this project drops the true-solar-time corre
 - Five small bodies only (Chiron + Ceres/Pallas/Juno/Vesta), not the full minor-planet catalogue — the same code path, so more could be added.
 - No fixed stars, no Arabic parts beyond the Part of Fortune, no antiscia.
 - Two ayanamsas only (Lahiri, Fagan-Bradley) — Krishnamurti and others are not implemented.
-- Orbs are not yet an input parameter (the defaults in the Conventions table above are fixed).
+- No synastry, transits, progressions or returns yet — natal charts only.
 
 ## 📜 License
 
