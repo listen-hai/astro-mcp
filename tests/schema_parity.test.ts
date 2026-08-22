@@ -34,7 +34,7 @@ test('clockTime and clockTimeRange are mutually exclusive', () => {
     solarDate: { year: 1990, month: 6, day: 15 },
     clockTime: { hour: 20, minute: 0 },
     clockTimeRange: { from: { hour: 18, minute: 0 }, to: { hour: 23, minute: 0 } },
-    place: 'Los Angeles',
+    place: 'Los Angeles, CA',
   });
   expect(r.success).toBe(false);
 });
@@ -59,7 +59,7 @@ test('defaults match the spec conventions table', () => {
   const r = AstroInputSchema.parse({
     solarDate: { year: 1990, month: 6, day: 15 },
     clockTime: { hour: 20, minute: 0 },
-    place: 'Los Angeles',
+    place: 'Los Angeles, CA',
   });
   expect(r.houseSystem).toBe('placidus');   // NOT whole-sign (auseklis A7)
   expect(r.zodiac).toBe('tropical');

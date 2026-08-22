@@ -45,7 +45,7 @@ test('calculate_natal returns a chart end to end', async () => {
   const r = await callTool('calculate_natal', {
     solarDate: { year: 1990, month: 6, day: 15 },
     clockTime: { hour: 20, minute: 0 },
-    place: 'Los Angeles',
+    place: 'Los Angeles, CA',
   });
   const chart = JSON.parse(r.content[0].text);
   expect(chart.highlights.sunSign).toBe('双子');
@@ -53,7 +53,7 @@ test('calculate_natal returns a chart end to end', async () => {
 });
 
 test('lookup_location returns coordinates including latitude', async () => {
-  const r = await callTool('lookup_location', { query: 'Los Angeles' });
+  const r = await callTool('lookup_location', { query: 'Los Angeles, CA' });
   const hits = JSON.parse(r.content[0].text);
   expect(hits[0].latitude).toBeDefined();
   expect(hits[0].timezone).toBe('America/Los_Angeles');
@@ -62,7 +62,7 @@ test('lookup_location returns coordinates including latitude', async () => {
 test('output is Chinese by default and English on request', async () => {
   const base = {
     solarDate: { year: 1990, month: 6, day: 15 },
-    clockTime: { hour: 20, minute: 0 }, place: 'Los Angeles',
+    clockTime: { hour: 20, minute: 0 }, place: 'Los Angeles, CA',
   };
   const zh = (await callTool('calculate_natal', base)).content[0].text;
   expect(zh).toContain('双子');
@@ -73,6 +73,6 @@ test('output is Chinese by default and English on request', async () => {
 
 test('a schema violation is reported, not silently coerced', async () => {
   await expect(callTool('calculate_natal', {
-    solarDate: { year: 1899, month: 6, day: 15 }, place: 'Los Angeles',
+    solarDate: { year: 1899, month: 6, day: 15 }, place: 'Los Angeles, CA',
   })).rejects.toThrow();
 });

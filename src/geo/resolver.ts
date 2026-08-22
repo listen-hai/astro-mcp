@@ -197,13 +197,25 @@ export function resolveLocation(input: {
       const sameTimezone = exactNameMatches.length > 0 &&
         exactNameMatches.every(c => c.timezone === exactNameMatches[0].timezone);
 
-      // All exact-name matches agree on timezone. That is a genuinely safe
-      // "no chart impact, pick silently" shortcut for bazi (longitude-only),
-      // but NOT for a Western chart: latitude drives the Ascendant directly,
-      // so same-timezone namesakes that disagree on latitude (e.g. Columbus,
-      // OH at 40.0N vs Columbus, GA at 32.5N, both America/New_York) still
-      // need disclosing.
-      if (sameTimezone) {
+      // Same timezone is NOT the same place. Columbus OH (40.0N) and Columbus
+      // GA (32.5N) share America/New_York, yet 7.5 deg of latitude moves the
+      // Ascendant outright and the 2 deg of longitude between them is 8
+      // minutes of true solar time -- enough to cross a Bazi hour-pillar
+      // boundary. An earlier "same timezone, no chart impact" shortcut picked
+      // one of them silently; these servers do not guess.
+      //
+      // What IS safe is collapsing entries that describe the same POINT:
+      // Kansas City MO and Kansas City KS are adjacent and carry identical
+      // coordinates here. Recognising that two records are one location is a
+      // fact about the data, not a guess about the user's intent.
+      const COORD_EPSILON = 0.1; // degrees, ~11 km -- below city-centroid noise
+      const sameSpot = exactNameMatches.length > 0 &&
+        Math.max(...exactNameMatches.map(c => c.latitude)) -
+          Math.min(...exactNameMatches.map(c => c.latitude)) <= COORD_EPSILON &&
+        Math.max(...exactNameMatches.map(c => c.longitude)) -
+          Math.min(...exactNameMatches.map(c => c.longitude)) <= COORD_EPSILON;
+
+      if (sameTimezone && sameSpot) {
         const city = candidates[0];
         const LAT_SPREAD_THRESHOLD = 1; // degrees
         const lats = exactNameMatches.map(c => c.latitude);
@@ -236,67 +248,28 @@ export function resolveLocation(input: {
         };
       }
 
-      // Timezones disagree, but if the top-ranked exact match's population
-      // dominates every conflicting-timezone runner-up by a wide margin, the
-      // ambiguity is theoretical rather than practical -- e.g. "Los Angeles"
-      // (US, pop ~8.1M) vs a same-named town in Bio-Bio, Chile (pop ~135k,
-      // ~60x smaller). Refusing outright would make one of the most common
-      // city names in astrology charts unusable.
-      //
-      // Genuinely comparable same-name cities still fall through to the
-      // refusal below: "Springfield" tops out at MA ~287k against MO ~181k
-      // in a different zone, only ~1.6x, so the caller is asked to be more
-      // specific. Verified against the shipped city-timezones data, not
-      // assumed -- note that database holds only ONE Cambridge (GB), so
-      // Cambridge is NOT an example of this branch.
-      const DOMINANCE_RATIO = 10;
-      // Guard: a query that only PARTIALLY matched (e.g. "Spring" hitting
-      // Springfield/Springdale in different zones) has no exact matches at
-      // all, so there is nothing to rank -- fall through to the candidate
-      // list below rather than indexing an empty array.
-      const top = exactNameMatches.length > 0 ? exactNameMatches[0] : undefined;
-      const topPop = top?.population ?? 0;
-      const runnerUp = top ? exactNameMatches.find(c => c.timezone !== top.timezone) : undefined;
-      const runnerUpPop = runnerUp?.population ?? 0;
-      const dominant = Boolean(top) && topPop > 0 && runnerUpPop > 0
-        && topPop >= runnerUpPop * DOMINANCE_RATIO;
-
-      if (dominant && top) {
-        const isAlternateTz = Boolean(input.timezone && top.alternateTimezones?.includes(input.timezone));
-        const isCustomTz = Boolean(input.timezone && input.timezone !== top.timezone && !isAlternateTz);
-        const locationSource: 'resolved' | 'mixed' = isCustomTz ? 'mixed' : 'resolved';
-        const dominanceNote =
-          `Place "${input.place}" matched multiple candidate cities with different timezones; picked ` +
-          `"${top.name} (${top.country})" (population ${Math.round(topPop).toLocaleString()}) over ` +
-          `"${runnerUp!.name} (${runnerUp!.country})" (population ${Math.round(runnerUpPop).toLocaleString()}), ` +
-          `a >=${DOMINANCE_RATIO}x difference. Pass explicit \`longitude\`+\`timezone\` if the smaller city was intended.`;
-
-        return {
-          longitude: top.longitude,
-          timezone: input.timezone || top.timezone,
-          latitude: top.latitude,
-          province: top.province,
-          placeName: `${top.name} (${top.country})`,
-          alternateTimezones: input.timezone ? undefined : top.alternateTimezones,
-          locationSource,
-          mixedWarning: isCustomTz
-            ? `${dominanceNote} Additionally, custom timezone ("${input.timezone}") was supplied by caller and used instead of the resolved one.`
-            : dominanceNote,
-        };
-      }
-
-      // Timezones disagree and no candidate dominates -> refuse and list candidates.
+      // Timezones disagree -> refuse and list candidates.
       // Getting the wrong timezone silently is catastrophic for a natal chart.
       // The calling AI agent can easily clarify with the user and retry.
+      // Refuse rather than pick. A same-name city in another timezone yields a
+      // chart for the wrong person, and no amount of population skew makes a
+      // guess honest -- the caller is an AI agent that can simply ask which
+      // one was meant. So the list has to be good enough to ASK from: the
+      // population lets the agent lead with the likely candidate, and the
+      // coordinates let it confirm without a second lookup.
       const listStr = candidates
         .slice(0, 5)
         .map(
           c =>
-            `• ${c.name} (${c.province || ''}, ${c.country}) -> longitude: ${c.longitude}°, timezone: "${c.timezone}"`
+            `• ${c.name} (${c.province || ''}, ${c.country})` +
+            `${c.population ? ` — population ${Math.round(c.population).toLocaleString('en-US')}` : ''}` +
+            ` -> latitude: ${c.latitude}°, longitude: ${c.longitude}°, timezone: "${c.timezone}"`
         )
         .join('\n');
       throw new Error(
-        `Place name "${input.place}" matched multiple candidate cities with different timezones; please specify more precisely (e.g. "Sydney, Australia") or explicitly provide \`longitude\` and \`timezone\`:\n${listStr}`
+        `Place name "${input.place}" matched multiple candidate cities in different timezones. ` +
+        `Ask which one was meant, then retry with a more specific \`place\` (e.g. "${candidates[0].name}, ${candidates[0].country}") ` +
+        `or with explicit \`longitude\` and \`timezone\`:\n${listStr}`
       );
     }
 

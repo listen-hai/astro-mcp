@@ -5,7 +5,7 @@ import { computeChart } from '../src/core/chart';
 // every finding in this file lived in a NON-default combination. The matrix
 // below is the coverage that was missing.
 
-const AT = { solarDate: { year: 1990, month: 6, day: 15 }, place: 'Los Angeles' } as const;
+const AT = { solarDate: { year: 1990, month: 6, day: 15 }, place: 'Los Angeles, CA' } as const;
 const EXACT = { ...AT, clockTime: { hour: 20, minute: 0 } };
 const RANGE = { ...AT, clockTimeRange: { from: { hour: 18, minute: 0 }, to: { hour: 23, minute: 59 } } };
 
@@ -114,13 +114,13 @@ test('a calendar date that does not exist is refused, not rolled forward', () =>
   // a confident chart for a date nobody was born on.
   for (const d of [{ month: 2, day: 30 }, { month: 4, day: 31 }, { month: 2, day: 29 }]) {
     expect(() => computeChart({
-      solarDate: { year: 1990, ...d }, clockTime: { hour: 20, minute: 0 }, place: 'Los Angeles',
+      solarDate: { year: 1990, ...d }, clockTime: { hour: 20, minute: 0 }, place: 'Los Angeles, CA',
     } as never)).toThrow(/does not exist|invalid date/i);
   }
   // ...but a real leap day is fine
   expect(() => computeChart({
     solarDate: { year: 1992, month: 2, day: 29 }, clockTime: { hour: 20, minute: 0 },
-    place: 'Los Angeles',
+    place: 'Los Angeles, CA',
   } as never)).not.toThrow();
 });
 
@@ -164,23 +164,31 @@ test('REGRESSION: the nodes must not aspect each other', () => {
 
 // -------------------------------------------------------------- disclosure
 
-test('a place that needed disambiguation says so in diagnostics', () => {
-  // "Los Angeles" also names a town in Bio-Bio, Chile. Picking the larger one
-  // is defensible; doing it without a word in the output is not.
+test('an unambiguous place resolves and records where the location came from', () => {
   const c = computeChart({ ...EXACT } as never);
   expect(c.diagnostics.location).toBeDefined();
-  expect(JSON.stringify(c.diagnostics.location)).toMatch(/Chile|CL|ambigu|dominan/i);
+  expect(c.diagnostics.location.source).toBe('resolved');
+  // Nothing was guessed, so there is nothing to warn about.
+  expect(c.diagnostics.location.warning).toBeNull();
 });
 
-test('same-timezone namesakes differ in LATITUDE, which changes the chart', () => {
-  // Columbus OH (40.0N) and Columbus GA (32.5N) share America/New_York. For
-  // bazi that is genuinely harmless -- it only uses longitude. For a chart the
-  // latitude drives the Ascendant, so silence is not acceptable here.
-  const c = computeChart({
+test('an ambiguous place is REFUSED, never resolved by picking the likely one', () => {
+  // "Los Angeles" also names a town in Chile at 1/60th the population. Odds
+  // that lopsided are still odds: the caller is an agent that can ask.
+  expect(() => computeChart({
+    solarDate: { year: 1990, month: 6, day: 15 }, clockTime: { hour: 20, minute: 0 },
+    place: 'Los Angeles',
+  } as never)).toThrow(/multiple candidate/i);
+});
+
+test('same-timezone namesakes are refused too -- one timezone is not one place', () => {
+  // Columbus OH (40.0N) and Columbus GA (32.5N) share America/New_York. The
+  // 7.5 deg of latitude between them moves the Ascendant outright, so "same
+  // timezone, no chart impact" was never true here.
+  expect(() => computeChart({
     solarDate: { year: 1990, month: 6, day: 15 }, clockTime: { hour: 20, minute: 0 },
     place: 'Columbus',
-  } as never);
-  expect(JSON.stringify(c.diagnostics.location)).toMatch(/ambigu|candidate|alternate|dominan/i);
+  } as never)).toThrow(/multiple candidate/i);
 });
 
 // ------------------------------------------------------------------ polar
@@ -241,7 +249,7 @@ test('a near-24h window enumerates every house, not just the endpoint one', () =
   // so the body passes through all twelve houses -- but the enumeration loop
   // stops immediately when the start and end house coincide.
   const c = computeChart({
-    solarDate: { year: 1990, month: 6, day: 15 }, place: 'Los Angeles',
+    solarDate: { year: 1990, month: 6, day: 15 }, place: 'Los Angeles, CA',
     clockTimeRange: { from: { hour: 20, minute: 0 }, to: { hour: 19, minute: 59 } },
   } as never);
   const sun = c.positions.find((p: { body: string }) => p.body === '太阳');
@@ -255,13 +263,13 @@ test('mixing `place` with an explicit latitude is refused, not silently blended'
   // mistake with a worse blast radius.
   expect(() => computeChart({
     solarDate: { year: 1990, month: 6, day: 15 }, clockTime: { hour: 20, minute: 0 },
-    place: 'Los Angeles', latitude: 60,
+    place: 'Los Angeles, CA', latitude: 60,
   } as never)).toThrow(/latitude|both|either/i);
 });
 
 test('range mode declares applying as omitted, exactly as date-only does', () => {
   const b = computeChart({
-    solarDate: { year: 1990, month: 6, day: 15 }, place: 'Los Angeles',
+    solarDate: { year: 1990, month: 6, day: 15 }, place: 'Los Angeles, CA',
     clockTimeRange: { from: { hour: 18, minute: 0 }, to: { hour: 23, minute: 59 } },
   } as never);
   expect(b.diagnostics.omitted.map((o: { field: string }) => o.field))
@@ -300,7 +308,7 @@ test('orbs are an input parameter, not a constant', () => {
   // Orbs are the most school-dependent number in a chart. README previously
   // had to say "not currently an input override"; spec 8 always required it.
   const base = { solarDate: { year: 1990, month: 6, day: 15 },
-                 clockTime: { hour: 20, minute: 0 }, place: 'Los Angeles' };
+                 clockTime: { hour: 20, minute: 0 }, place: 'Los Angeles, CA' };
   const tight = computeChart({ ...base, orbs: { conjunction: 1, sextile: 1, square: 1, trine: 1, opposition: 1 } } as never);
   const loose = computeChart({ ...base, orbs: { conjunction: 12, sextile: 12, square: 12, trine: 12, opposition: 12 } } as never);
   expect(tight.aspects.length).toBeLessThan(loose.aspects.length);
@@ -311,6 +319,6 @@ test('orbs are an input parameter, not a constant', () => {
 test('a typo in orbs is rejected at the schema layer', () => {
   expect(() => computeChart({
     solarDate: { year: 1990, month: 6, day: 15 }, clockTime: { hour: 20, minute: 0 },
-    place: 'Los Angeles', orbs: { conjuction: 10 },
+    place: 'Los Angeles, CA', orbs: { conjuction: 10 },
   } as never)).toThrow(/unknown aspect|conjuction/i);
 });

@@ -51,7 +51,7 @@ test('years outside 1900-2100 are rejected at the schema layer', () => {
   for (const year of [1899, 2101]) {
     const r = AstroInputSchema.safeParse({
       solarDate: { year, month: 6, day: 15 },
-      clockTime: { hour: 20, minute: 0 }, place: 'Los Angeles',
+      clockTime: { hour: 20, minute: 0 }, place: 'Los Angeles, CA',
     });
     expect(r.success).toBe(false);
   }

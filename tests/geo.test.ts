@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { lookupCity } from '../src/geo/resolver';
+import { lookupCity, resolveLocation } from '../src/geo/resolver';
 
 // Tolerance is 0.3 deg: the city-timezones DB stores a municipal centroid, not the
 // landmark coordinate people quote. 0.3 deg of latitude shifts the Ascendant by well
@@ -38,4 +38,44 @@ test('above the Arctic Circle resolves (polar handling is exercised downstream)'
 
 test('unknown city yields no match rather than a wrong one', () => {
   expect(lookupCity('Nowherecityxyz')).toHaveLength(0);
+});
+
+// ------------------------------------------------------------- never guess
+
+test('same-name cities in one timezone but different places are REFUSED', () => {
+  // Columbus OH (40.0N) and Columbus GA (32.5N) share America/New_York, so an
+  // earlier "same timezone means no chart impact" shortcut picked one
+  // silently. It is wrong for every sibling: 7.5 deg of latitude moves the
+  // Ascendant outright, and the 2 deg of longitude between them is 8 minutes
+  // of true solar time, enough to cross a Bazi hour-pillar boundary.
+  expect(() => resolveLocation({ place: 'Columbus' })).toThrow(/multiple candidate/i);
+});
+
+test('same-name entries at the SAME point still resolve -- that is a fact, not a guess', () => {
+  // Kansas City MO and Kansas City KS are adjacent and carry identical
+  // coordinates in the dataset. Refusing there would be pedantry: there is no
+  // ambiguity about where the birth happened.
+  const kc = resolveLocation({ place: 'Kansas City' });
+  expect(kc.timezone).toBe('America/Chicago');
+});
+
+test('the refusal tells an agent how to resolve it in one turn', () => {
+  // The caller is an AI agent that can ask the user. A refusal is only
+  // acceptable if it carries what the agent needs to ask a good question.
+  let msg = '';
+  try { resolveLocation({ place: 'San Jose' }); } catch (e) { msg = (e as Error).message; }
+  expect(msg).toMatch(/ask which one/i);
+  expect(msg).toMatch(/population/);       // lets the agent lead with the likely one
+  expect(msg).toMatch(/latitude/);
+  expect(msg).toMatch(/longitude/);
+  expect(msg).toMatch(/timezone/);
+});
+
+test('no place name is ever resolved by picking the biggest candidate', () => {
+  // Regression guard for the population-dominance rule that once auto-picked
+  // Los Angeles (US) over Los Angeles (Chile) at a 60x margin. Overwhelming
+  // odds are still odds.
+  for (const place of ['Los Angeles', 'San Jose', 'Springfield', 'Columbus']) {
+    expect(() => resolveLocation({ place })).toThrow();
+  }
 });

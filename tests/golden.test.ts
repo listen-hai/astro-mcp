@@ -6,7 +6,7 @@ import { computeChart } from '../src/core/chart';
 const LA_1990 = {
   solarDate: { year: 1990, month: 6, day: 15 },
   clockTime: { hour: 20, minute: 0 },
-  place: 'Los Angeles',
+  place: 'Los Angeles, CA',
 } as const;
 
 test('golden chart: bodies land in the expected signs', () => {

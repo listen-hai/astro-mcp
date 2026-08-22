@@ -6,7 +6,7 @@ import { computeChart } from '../src/core/chart';
 // fills in a default time -- the single most likely way this promise gets lost,
 // because a silent noon default produces output that looks completely normal.
 
-const base = { solarDate: { year: 1990, month: 6, day: 15 }, place: 'Los Angeles' } as const;
+const base = { solarDate: { year: 1990, month: 6, day: 15 }, place: 'Los Angeles, CA' } as const;
 
 test('mode A (exact time) does not degrade -- the three headline signs are present', () => {
   const c = computeChart({ ...base, clockTime: { hour: 20, minute: 0 } } as never);
