@@ -59,13 +59,25 @@ test('same-name entries at the SAME point still resolve -- that is a fact, not a
   expect(kc.timezone).toBe('America/Chicago');
 });
 
+test('the refusal carries no likelihood hint -- asking must stay neutral', () => {
+  // Population is a prior, not identifying information, and it is the exact
+  // signal behind the auto-pick that used to live here. Listing it would move
+  // the guess from our code into the agent's prompt: "Ohio, right?" instead
+  // of "Ohio or Georgia?".
+  let msg = '';
+  try { resolveLocation({ place: 'Columbus' }); } catch (e) { msg = (e as Error).message; }
+  expect(msg).not.toMatch(/population/i);
+  expect(msg).toMatch(/Ohio/);
+  expect(msg).toMatch(/Georgia/);
+});
+
 test('the refusal tells an agent how to resolve it in one turn', () => {
   // The caller is an AI agent that can ask the user. A refusal is only
   // acceptable if it carries what the agent needs to ask a good question.
   let msg = '';
   try { resolveLocation({ place: 'San Jose' }); } catch (e) { msg = (e as Error).message; }
   expect(msg).toMatch(/ask which one/i);
-  expect(msg).toMatch(/population/);       // lets the agent lead with the likely one
+  expect(msg).toMatch(/California/);       // province: how a person recognises their own city
   expect(msg).toMatch(/latitude/);
   expect(msg).toMatch(/longitude/);
   expect(msg).toMatch(/timezone/);
