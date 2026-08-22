@@ -101,7 +101,16 @@ export function computeTransits(input: TransitsInput): AstroChart {
     new Map(transiting.map(({ name, raw }) => [name, raw])),
     ctx.lang
   );
-  const natalSnapshots = natalFrame.snapshots.map((s) => toAspectPositions(s, ctx.lang));
+  // Zeroed speed, deliberately: a natal position is frozen at birth, so the
+  // conventional transit "applying/separating" is the TRANSITING body's own
+  // motion closing or widening the orb against a stationary point -- not the
+  // natal body's long-dead birth-epoch speed. Feeding the real birth-epoch
+  // speed into isApplying would let ancient motion decide the flag (worst for
+  // the Moon, ~13 deg/day at birth), producing a confident-looking wrong
+  // value -- exactly what this project exists to refuse.
+  const natalSnapshots = natalFrame.snapshots.map(
+    (s) => toAspectPositions(s, ctx.lang).map((p) => ({ ...p, speed: 0 }))
+  );
 
   const opts = { minorAspects: ctx.minorAspects, declinationAspects: ctx.declinationAspects, orbs: ctx.orbs };
   const moonName = bodyName('Moon', ctx.lang);

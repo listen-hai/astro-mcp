@@ -226,9 +226,9 @@ const transitTargetProperty: object = {
   additionalProperties: false,
   description: 'The instant to compute the transiting sky for. Omit entirely to default to the current instant ("now") -- see diagnostics.targetSource/targetUtc. If provided, both solarDate and clockTime are required together.',
   properties: {
-    solarDate: natalProperties.solarDate,
-    clockTime: natalProperties.clockTime,
-    dstFold: natalProperties.dstFold,
+    solarDate: { ...(natalProperties.solarDate as object), description: 'Solar (Gregorian) target date' },
+    clockTime: { ...(natalProperties.clockTime as object), description: 'Clock time of the target instant' },
+    dstFold: { ...(natalProperties.dstFold as object), description: 'DST fall-back disambiguation for the target instant: 0 = first occurrence (DST), 1 = second occurrence (standard time)' },
   },
   required: ['solarDate', 'clockTime'],
 };
