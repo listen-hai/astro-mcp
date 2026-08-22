@@ -57,3 +57,9 @@ test('a window longer than five years is refused rather than grinding', () => {
   expect(() => findRetrograde({ body: 'Mercury', from: { year: 2000, month: 1, day: 1 }, to: { year: 2026, month: 1, day: 1 } } as never))
     .toThrow(/range|window|too long/i);
 });
+
+test('a nonexistent window date is refused, not silently rolled forward', () => {
+  expect(() => findRetrograde({
+    body: 'Mercury', from: { year: 2026, month: 2, day: 30 }, to: { year: 2026, month: 12, day: 31 },
+  } as never)).toThrow(/does not exist|invalid date/i);
+});

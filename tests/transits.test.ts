@@ -54,3 +54,29 @@ test('aspects to the natal Moon are marked uncertain when the birth time is unkn
     expect(a.uncertain).toBe(true);
   }
 });
+
+test('a known time WINDOW yields natal house candidates, not nothing', () => {
+  const t = computeTransits({
+    ...NATAL, clockTime: undefined,
+    clockTimeRange: { from: { hour: 11, minute: 15 }, to: { hour: 11, minute: 45 } },
+    target: TARGET,
+  } as never);
+  const withCandidates = t.transiting.filter((p: { natalHouseCandidates?: number[] }) => p.natalHouseCandidates);
+  expect(withCandidates.length).toBeGreaterThan(0);
+  expect(t.diagnostics.omitted.map((o: { field: string }) => o.field))
+    .not.toContain('transiting[].natalHouse');
+});
+
+test('a nonexistent target date is refused, exactly as the natal tool refuses one', () => {
+  expect(() => computeTransits({
+    ...NATAL, target: { solarDate: { year: 2026, month: 2, day: 30 }, clockTime: { hour: 12, minute: 0 } },
+  } as never)).toThrow(/does not exist|invalid date/i);
+});
+
+test('south-node aspects are suppressed by default here too', () => {
+  const t = computeTransits({ ...NATAL, target: TARGET } as never);
+  for (const a of t.aspects) {
+    expect(a.transiting).not.toBe('南交点');
+    expect(a.natal).not.toBe('南交点');
+  }
+});

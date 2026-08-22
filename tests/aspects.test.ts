@@ -122,3 +122,26 @@ test('unknown orb keys are rejected rather than silently ignored', () => {
   expect(() => computeAspects([P('Sun', 0), P('Moon', 5)], { orbs: { conjuction: 10 } as never }))
     .toThrow(/unknown aspect|conjuction/i);
 });
+
+test('south-node aspects are off by default and mirror-aware when suppressed', () => {
+  const NN = { body: '北交点', lon: 10, dec: 5, speed: -0.05, id: 'NorthNode' };
+  const SN = { body: '南交点', lon: 190, dec: -5, speed: -0.05, id: 'SouthNode' };
+  const venus = P('金星', 190);   // conjunct SN, opposite NN
+
+  const off = computeAspects([venus, NN, SN], {});
+  expect(off.some((a) => a.body1 === '南交点' || a.body2 === '南交点')).toBe(false);
+  expect(off.some((a) => a.aspect === '冲')).toBe(true);          // the NN mirror survives
+
+  const on = computeAspects([venus, NN, SN], { southNodeAspects: true });
+  expect(on.some((a) => a.body1 === '南交点' || a.body2 === '南交点')).toBe(true);
+});
+
+test('suppression is mirror-aware: an aspect with no counterpart is kept', () => {
+  // A quintile (72 deg) mirrors to 108 deg, which is not in the aspect set --
+  // dropping it outright would lose the fact entirely rather than deduplicate.
+  const SN = { body: '南交点', lon: 0, dec: 0, speed: -0.05, id: 'SouthNode' };
+  const NN = { body: '北交点', lon: 180, dec: 0, speed: -0.05, id: 'NorthNode' };
+  const p = P('火星', 72);       // quintile SN; 108 deg from NN -- no aspect
+  const out = computeAspects([p, NN, SN], { minorAspects: true });
+  expect(out.some((a) => a.aspect === '五分相')).toBe(true);
+});
