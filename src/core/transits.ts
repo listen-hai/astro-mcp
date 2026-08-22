@@ -100,12 +100,15 @@ export function computeTransits(input: TransitsInput): AstroChart {
       ? {}
       : natalCuspsList.length === 1
         ? { natalHouse: houseOfLongitude(raw.lon, natalCuspsList[0]) }
-        : {
-            natalHouseCandidates: houseRangeCandidates(
-              houseOfLongitude(raw.lon, natalCuspsList[0]),
-              houseOfLongitude(raw.lon, natalCuspsList[1])
-            ),
-          };
+        : (() => {
+            const h0 = houseOfLongitude(raw.lon, natalCuspsList[0]);
+            const h1 = houseOfLongitude(raw.lon, natalCuspsList[1]);
+            // Same full-turn rule as chart.ts and synastry: a natal window
+            // wider than half a day ending in its starting house swept all
+            // twelve. Reporting one house there would be a confident lie.
+            const fullTurn = (natalFrame.spanMs ?? 0) > 12 * 3600 * 1000 && h0 === h1;
+            return { natalHouseCandidates: houseRangeCandidates(h0, h1, fullTurn) };
+          })();
     return {
       body: bodyName(name, ctx.lang),
       sign: signOfLongitude(disp, ctx.lang),

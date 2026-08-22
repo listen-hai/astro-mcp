@@ -136,3 +136,23 @@ test('southNodeAspects: true brings them back', () => {
   expect(s.aspects.some((a: { bodyA: string; bodyB: string }) =>
     a.bodyA === '南交点' || a.bodyB === '南交点')).toBe(true);
 });
+
+test('a near-day-long window sweeps every house, in synastry as in the natal tool', () => {
+  // Cusps make one full turn per day, so a ~23h window returns a body to the
+  // house it started in having crossed all twelve. chart.ts detects this via
+  // `sweepsFullTurn`; the overlay path used to report a confident single house.
+  const wide = { ...A, clockTime: undefined,
+                 clockTimeRange: { from: { hour: 1, minute: 0 }, to: { hour: 0, minute: 30 } } };
+  const s = computeSynastry({ personA: wide, personB: B } as never);
+  // Every body must show a wide sweep -- a single confident house is the bug.
+  for (const o of s.overlays.bInA as { body: string; houseCandidates: number[] }[]) {
+    expect(o.houseCandidates.length).toBeGreaterThan(1);
+  }
+  expect(s.overlays.bInA.some((o: { houseCandidates: number[] }) => o.houseCandidates.length === 12)).toBe(true);
+
+  // ...and the same person through calculate_natal agrees.
+  const { computeChart } = require('../src/core/chart');
+  const natal = computeChart(wide as never);
+  const twelve = natal.positions.filter((p: { houseCandidates?: number[] }) => p.houseCandidates?.length === 12);
+  expect(twelve.length).toBeGreaterThan(0);
+});

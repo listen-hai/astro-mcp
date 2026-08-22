@@ -68,6 +68,13 @@ export interface PersonFrame {
    * anything about houses at all.
    */
   cusps?: number[][];
+  /**
+   * Width of the window the two snapshots bracket, in milliseconds. Cusps make
+   * one full turn per day, so a window wider than half a day that returns a
+   * body to the house it started in must have carried it through all twelve --
+   * the same reasoning chart.ts's `sweepsFullTurn` uses. Absent when exact.
+   */
+  spanMs?: number;
 }
 
 /** Builds one person's raw frame -- snapshot(s) of every body/point, angles/cusps whenever an exact instant or a bounded window is known. */
@@ -87,9 +94,12 @@ export function buildFrame(input: AstroInput, ctx: Ctx): PersonFrame {
   if (instants.mode === 'range') {
     const cusps0 = anglesAndHousesAt(instants.t0, ctx.loc, ctx.houseSystem, ctx.zodiac).houses.cusps;
     const cusps1 = anglesAndHousesAt(instants.t1, ctx.loc, ctx.houseSystem, ctx.zodiac).houses.cusps;
-    return { exact: false, snapshots, cusps: [cusps0, cusps1] };
+    return {
+      exact: false, snapshots, cusps: [cusps0, cusps1],
+      spanMs: instants.t1.getTime() - instants.t0.getTime(),
+    };
   }
-  return { exact: false, snapshots };
+  return { exact: false, snapshots, spanMs: instants.t1.getTime() - instants.t0.getTime() };
 }
 
 /** A raw snapshot as the `AspectPosition[]` shape `computeAspects`/`computeCrossAspects` need. */

@@ -80,12 +80,16 @@ function overlay(source: PersonFrame, target: PersonFrame, lang: Lang) {
     // forward through the zodiac against fixed cusps), the true sweep is
     // ASCENDING house0 -> house1, which is the same set as decrementing from
     // house1 down to house0 -- so the arguments swap.
+    // A window wider than half a day that ends in the house it started in must
+    // have carried the body through all twelve -- no house spans 180 deg, and
+    // the cusps make a full turn per day. Same rule chart.ts applies in its own
+    // range mode; without it the overlay reports one confident house for a
+    // sweep that actually crossed every one of them.
+    const span = (targetRanged ? target.spanMs : source.spanMs) ?? 0;
+    const fullTurn = span > 12 * 3600 * 1000 && house0 === house1;
     const houseCandidates = targetRanged
-      ? houseRangeCandidates(house0, house1)
-      : houseRangeCandidates(house1, house0);
-    // ponytail: does not detect a >12h window sweeping a full turn (chart.ts's
-    // own computeRange does, via `sweepsFullTurn`) -- upgrade by threading the
-    // window span through PersonFrame if a caller ever reports it as wrong.
+      ? houseRangeCandidates(house0, house1, fullTurn)
+      : houseRangeCandidates(house1, house0, fullTurn);
     return { body: displayName, houseCandidates };
   });
 }
