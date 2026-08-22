@@ -295,3 +295,22 @@ test('a clamped range endpoint is disclosed in diagnostics, not swallowed', () =
   } as never);
   expect(c.diagnostics.note).toMatch(/skipped|daylight|clamp/i);
 });
+
+test('orbs are an input parameter, not a constant', () => {
+  // Orbs are the most school-dependent number in a chart. README previously
+  // had to say "not currently an input override"; spec 8 always required it.
+  const base = { solarDate: { year: 1990, month: 6, day: 15 },
+                 clockTime: { hour: 20, minute: 0 }, place: 'Los Angeles' };
+  const tight = computeChart({ ...base, orbs: { conjunction: 1, sextile: 1, square: 1, trine: 1, opposition: 1 } } as never);
+  const loose = computeChart({ ...base, orbs: { conjunction: 12, sextile: 12, square: 12, trine: 12, opposition: 12 } } as never);
+  expect(tight.aspects.length).toBeLessThan(loose.aspects.length);
+  // and the applied table is reported back
+  expect(loose.diagnostics.orbs).toBeDefined();
+});
+
+test('a typo in orbs is rejected at the schema layer', () => {
+  expect(() => computeChart({
+    solarDate: { year: 1990, month: 6, day: 15 }, clockTime: { hour: 20, minute: 0 },
+    place: 'Los Angeles', orbs: { conjuction: 10 },
+  } as never)).toThrow(/unknown aspect|conjuction/i);
+});

@@ -81,7 +81,13 @@ export const AstroInputObjectSchema = z
     zodiac: z.enum(['tropical', 'sidereal-lahiri', 'sidereal-fagan-bradley']).default('tropical'),
     node: z.enum(['true', 'mean']).default('true'),
     lilith: z.enum(['mean', 'true']).default('mean'),
-    minorAspects: z.boolean().default(false),
+    orbs: z.record(z.string(), z.number().min(0).max(30)).optional()
+    .describe('Per-aspect orb overrides in degrees, keyed by aspect: conjunction, '
+      + 'sextile, square, trine, opposition, semisextile, semisquare, quintile, '
+      + 'sesquiquadrate, quincunx. Orbs are the most school-dependent number in a '
+      + 'chart, so the defaults (8/6/7/7/8 for the majors) are only a starting '
+      + 'point. Unknown keys are rejected rather than ignored.'),
+  minorAspects: z.boolean().default(false),
     declinationAspects: z.boolean().default(false),
     asteroids: z.boolean().default(false),
     chiron: z.boolean().default(true),

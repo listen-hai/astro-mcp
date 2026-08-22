@@ -153,9 +153,14 @@ const natalPropertiesRaw: Record<string, object> = {
     enum: ['mean', 'true'],
     description: 'Black Moon Lilith: "mean" (mean lunar apogee, default -- the popular-astrology convention) or "true" (osculating apogee).',
   },
+  orbs: {
+    type: 'object',
+    description: 'Per-aspect orb overrides in degrees. Keys: conjunction, sextile, square, trine, opposition, semisextile, semisquare, quintile, sesquiquadrate, quincunx. Orbs are the most school-dependent number in a chart -- the defaults (conjunction/opposition 8, square/trine 7, sextile 6, minors 2-3) are the common modern convention, not a fact. An unknown key is rejected rather than ignored, so a typo cannot leave the default silently in place. The table actually applied comes back in diagnostics.orbs.',
+    additionalProperties: { type: 'number', minimum: 0, maximum: 30 },
+  },
   minorAspects: {
     type: 'boolean',
-    description: 'Include minor aspects (semisextile 30, semisquare 45, quintile 72, quincunx 150) alongside the five major aspects. Off by default.',
+    description: 'Include minor aspects (semisextile 30, semisquare 45, quintile 72, sesquiquadrate 135, quincunx 150) alongside the five major aspects. Off by default.',
   },
   declinationAspects: {
     type: 'boolean',

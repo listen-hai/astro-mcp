@@ -52,10 +52,19 @@ export function houseOfLongitude(longitude: number, cusps: number[]): number {
 /** Static default orb table (spec 8) -- not currently exposed as an input override.
  * Keys are aspect names in the requested display language: this is user-facing
  * diagnostics output, governed by the same `lang` switch as everything else. */
-export function defaultOrbTable(minorAspects: boolean, lang: Lang): Record<string, number> {
+/**
+ * The orb table actually in force, reported back in `diagnostics.orbs` so the
+ * caller can see which convention produced their aspects -- defaults merged
+ * with any per-aspect override they passed.
+ */
+export function effectiveOrbTable(
+  minorAspects: boolean,
+  lang: Lang,
+  overrides?: Record<string, number>
+): Record<string, number> {
   const table: Record<string, number> = {};
-  for (const d of MAJOR_ASPECTS) table[aspectName(d.name, lang)] = d.orb;
-  if (minorAspects) for (const d of MINOR_ASPECTS) table[aspectName(d.name, lang)] = d.orb;
+  const defs = [...MAJOR_ASPECTS, ...(minorAspects ? MINOR_ASPECTS : [])];
+  for (const d of defs) table[aspectName(d.name, lang)] = overrides?.[d.key] ?? d.orb;
   return table;
 }
 

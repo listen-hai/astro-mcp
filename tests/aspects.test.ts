@@ -80,3 +80,45 @@ test('outer-planet rulerships are flagged as a modern addition, not consensus', 
   expect(dignityOf('Neptune', 340).modern).toBe(true);  // Pisces
   expect(dignityOf('Mars', 5).modern).toBe(false);      // classical, undisputed
 });
+
+// ---------------------------------------------------------- aspect naming
+
+test('the 45 and 135 degree aspects carry their correct Chinese names', () => {
+  // 45 deg is 八分相 (semi-square, also 半刑); 八分之三相位 is the name for
+  // 135 deg (sesquiquadrate). The table originally attached the 135 deg name
+  // to the 45 deg angle and omitted 135 deg entirely.
+  const at = (sep: number) =>
+    computeAspects([P('Sun', 0), P('Moon', sep)], { minorAspects: true })[0]?.aspect;
+  expect(at(45)).toBe('八分相');
+  expect(at(135)).toBe('补八分相');
+  expect(at(30)).toBe('半六合');
+  expect(at(72)).toBe('五分相');
+  expect(at(150)).toBe('补十二');
+});
+
+// ------------------------------------------------------------ orb overrides
+
+test('orbs can be overridden per aspect with language-independent keys', () => {
+  // Orbs are the single most school-dependent number in the whole chart, so
+  // they must be a parameter rather than a constant. Keys are English so the
+  // API does not change shape with `lang`.
+  const wide = computeAspects([P('Sun', 0), P('Moon', 9)], { orbs: { conjunction: 10 } });
+  expect(wide[0].aspect).toBe('合');
+  expect(computeAspects([P('Sun', 0), P('Moon', 9)], {})).toHaveLength(0);
+
+  const narrow = computeAspects([P('Sun', 0), P('Moon', 5)], { orbs: { conjunction: 3 } });
+  expect(narrow).toHaveLength(0);
+});
+
+test('an orb override touches only the aspect it names', () => {
+  const opts = { orbs: { conjunction: 2 } };
+  expect(computeAspects([P('Sun', 0), P('Moon', 5)], opts)).toHaveLength(0);      // conjunction narrowed
+  expect(computeAspects([P('Sun', 0), P('Moon', 186)], opts)[0].aspect).toBe('冲'); // opposition untouched
+});
+
+test('unknown orb keys are rejected rather than silently ignored', () => {
+  // A typo like { conjuction: 10 } must not quietly leave the default in place;
+  // the caller would believe a convention was applied when it was not.
+  expect(() => computeAspects([P('Sun', 0), P('Moon', 5)], { orbs: { conjuction: 10 } as never }))
+    .toThrow(/unknown aspect|conjuction/i);
+});

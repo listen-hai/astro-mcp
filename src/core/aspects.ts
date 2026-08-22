@@ -29,32 +29,43 @@ export interface Aspect {
 export interface AspectOptions {
   minorAspects?: boolean;
   declinationAspects?: boolean;
-  /** Per-aspect-name orb overrides, e.g. { 合: 10 }. */
+  /** Orb overrides keyed by the language-independent aspect key,
+   * e.g. { conjunction: 10 }. Unknown keys throw. */
   orbs?: Partial<Record<string, number>>;
   /** Orb for parallel/contraparallel declination aspects (default 1 deg). */
   declinationOrb?: number;
 }
 
 interface AspectDef {
+  /** Language-independent identifier. Orb overrides key off this, so the API
+   * shape does not change with `lang`. */
+  key: string;
   name: string;
   angle: number;
   orb: number;
 }
 
 export const MAJOR_ASPECTS: AspectDef[] = [
-  { name: '合', angle: 0, orb: 8 },
-  { name: '六合', angle: 60, orb: 6 },
-  { name: '刑', angle: 90, orb: 7 },
-  { name: '拱', angle: 120, orb: 7 },
-  { name: '冲', angle: 180, orb: 8 },
+  { key: 'conjunction', name: '合', angle: 0, orb: 8 },
+  { key: 'sextile', name: '六合', angle: 60, orb: 6 },
+  { key: 'square', name: '刑', angle: 90, orb: 7 },
+  { key: 'trine', name: '拱', angle: 120, orb: 7 },
+  { key: 'opposition', name: '冲', angle: 180, orb: 8 },
 ];
 
 export const MINOR_ASPECTS: AspectDef[] = [
-  { name: '半六合', angle: 30, orb: 2 },
-  { name: '八分之三', angle: 45, orb: 2 },
-  { name: '五分相', angle: 72, orb: 2 },
-  { name: '补十二', angle: 150, orb: 3 },
+  { key: 'semisextile', name: '半六合', angle: 30, orb: 2 },
+  // 45 deg is 八分相 (semi-square, also 半刑). An earlier table labelled it
+  // 八分之三 -- that is the name of the 135 deg aspect, which was missing
+  // entirely. Verified against Chinese astrology references, not assumed.
+  { key: 'semisquare', name: '八分相', angle: 45, orb: 2 },
+  { key: 'quintile', name: '五分相', angle: 72, orb: 2 },
+  { key: 'sesquiquadrate', name: '补八分相', angle: 135, orb: 2 },
+  { key: 'quincunx', name: '补十二', angle: 150, orb: 3 },
 ];
+
+/** Every orb key a caller may legally pass. */
+export const ORB_KEYS = [...MAJOR_ASPECTS, ...MINOR_ASPECTS].map((a) => a.key);
 
 /** The North/South Node axis is 180 deg apart BY CONSTRUCTION (opposite points
  * of the same node line), and their declinations are equal and opposite for
@@ -89,6 +100,17 @@ function isApplying(p1: AspectPosition, p2: AspectPosition, angle: number, orbNo
 export function computeAspects(positions: AspectPosition[], opts: AspectOptions): Aspect[] {
   const defs = [...MAJOR_ASPECTS, ...(opts.minorAspects ? MINOR_ASPECTS : [])];
   const declinationOrb = opts.declinationOrb ?? 1;
+
+  // Reject unknown orb keys rather than ignoring them. A typo like
+  // { conjuction: 10 } would otherwise leave the default silently in place and
+  // the caller would believe their convention had been applied.
+  for (const key of Object.keys(opts.orbs ?? {})) {
+    if (!ORB_KEYS.includes(key)) {
+      throw new Error(
+        `Unknown aspect in \`orbs\`: "${key}". Valid keys: ${ORB_KEYS.join(', ')}.`
+      );
+    }
+  }
   const results: Aspect[] = [];
 
   for (let i = 0; i < positions.length; i++) {
@@ -99,7 +121,7 @@ export function computeAspects(positions: AspectPosition[], opts: AspectOptions)
       const sep = separation(p1.lon, p2.lon);
 
       for (const def of defs) {
-        const orb = opts.orbs?.[def.name] ?? def.orb;
+        const orb = opts.orbs?.[def.key] ?? def.orb;
         const delta = Math.abs(sep - def.angle);
         if (delta <= orb) {
           results.push({

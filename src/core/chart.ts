@@ -41,7 +41,7 @@ import {
   dignityDisplay,
   ACCURACY_NOTE,
 } from './i18n';
-import { formatDegree, houseOfLongitude, defaultOrbTable, formatLocalTime, fwdArc } from './output';
+import { formatDegree, houseOfLongitude, effectiveOrbTable, formatLocalTime, fwdArc } from './output';
 
 const A = ((AstronomyImport as unknown as { default?: typeof AstronomyImport }).default ??
   AstronomyImport) as typeof AstronomyImport;
@@ -121,6 +121,7 @@ interface Ctx {
   lilithKind: 'mean' | 'true';
   minorAspects: boolean;
   declinationAspects: boolean;
+  orbs?: Record<string, number>;
   chironOn: boolean;
   asteroidsOn: boolean;
   lang: Lang;
@@ -176,6 +177,7 @@ function buildCtx(input: AstroInput): Ctx {
     lilithKind,
     minorAspects,
     declinationAspects,
+    orbs: input.orbs,
     chironOn,
     asteroidsOn,
     lang,
@@ -191,7 +193,7 @@ function buildCtx(input: AstroInput): Ctx {
       zodiac,
       node,
       lilith: lilithKind,
-      orbs: defaultOrbTable(minorAspects, lang),
+      orbs: effectiveOrbTable(minorAspects, lang, input.orbs),
       included,
       ephemeris: `astronomy-engine@${astronomyEngineVersion()}`,
       accuracyNote: ACCURACY_NOTE[lang],
@@ -228,7 +230,7 @@ function resolvedLocationOutput(ctx: Ctx) {
 /** Matches aspects present at BOTH endpoints of a time span (spec 4.3 mode B/C): the
  * only "aspect held throughout" claim honest enough to make without an exact time. */
 function aspectsOverRange(pos0: AspectPosition[], pos1: AspectPosition[], ctx: Ctx) {
-  const opts = { minorAspects: ctx.minorAspects, declinationAspects: ctx.declinationAspects };
+  const opts = { minorAspects: ctx.minorAspects, declinationAspects: ctx.declinationAspects, orbs: ctx.orbs };
   const a0 = computeAspects(pos0, opts);
   const a1 = computeAspects(pos1, opts);
   const key = (a: { body1: string; body2: string; aspect: string }) => `${a.body1}|${a.body2}|${a.aspect}`;
@@ -298,6 +300,7 @@ function computeExact(input: AstroInput, ctx: Ctx): AstroChart {
   const aspects = computeAspects(aspectPositions, {
     minorAspects: ctx.minorAspects,
     declinationAspects: ctx.declinationAspects,
+    orbs: ctx.orbs,
   }).map((a) => ({ ...a, aspect: aspectName(a.aspect, ctx.lang) }));
 
   // Day/night (sect) for the Part of Fortune is a PHYSICAL fact -- was the
