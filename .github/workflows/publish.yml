@@ -1,0 +1,74 @@
+name: Publish to NPM
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    name: Build & Publish to NPM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm for trusted publishing
+        # OIDC trusted publishing needs npm >= 11.5.1; Node 22.x ships npm 10.x,
+        # so without this the publish silently falls back to token auth (and
+        # fails once NPM_TOKEN is gone).
+        run: npm install -g npm@latest
+
+      - name: Verify tag matches package.json version
+        # Prevents two failure modes: a workflow_dispatch run (no tag at all)
+        # publishing whatever version sits on the ref, and a tag that doesn't
+        # match package.json — which either 403s after the test run (tag
+        # ahead of package.json) or, worse, publishes a mislabeled version
+        # (package.json ahead of the tag) with no error at all.
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF: ${{ github.ref }}
+        run: |
+          if [[ "$REF_TYPE" != "tag" ]]; then
+            echo "::error::Refusing to publish: this run is not triggered by a tag (ref: $REF). Push a v* tag instead of using workflow_dispatch."
+            exit 1
+          fi
+          tag_version="${GITHUB_REF_NAME#v}"
+          pkg_version="$(node -p "require('./package.json').version")"
+          if [[ "$tag_version" != "$pkg_version" ]]; then
+            echo "::error::Tag/version mismatch: tag '${GITHUB_REF_NAME}' implies version '${tag_version}', but package.json has '${pkg_version}'. Update package.json and re-tag before publishing."
+            exit 1
+          fi
+          echo "Tag ${GITHUB_REF_NAME} matches package.json version ${pkg_version}."
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run Test Suite
+        run: bun run test
+
+      - name: Build Production Bundle
+        run: bun run build
+
+      - name: Publish to NPM
+        # Authenticated by OIDC trusted publishing (npm -> Settings -> Trusted
+        # Publisher, bound to listen-hai/astro-mcp + this filename). No
+        # long-lived token: `id-token: write` above is the entire credential,
+        # and provenance is attached automatically.
+        run: npm publish --access public

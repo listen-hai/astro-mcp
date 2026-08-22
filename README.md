@@ -128,6 +128,21 @@ Resolves an English city name to longitude, latitude, and IANA timezone across 7
 
 ---
 
+## 🚢 Releasing
+
+Publishing is automated and runs on a tag:
+
+```bash
+# bump the version in package.json first, then
+git tag -a v0.1.2 -m "v0.1.2" && git push origin v0.1.2
+```
+
+The workflow refuses to publish unless the tag matches `package.json`'s
+version, and refuses `workflow_dispatch` runs outright — a manual run has no
+tag, so it would publish whatever happens to sit on the branch. It authenticates
+through npm's OIDC trusted publishing rather than a long-lived `NPM_TOKEN`, so
+there is no secret to rotate or leak, and provenance is attached automatically.
+
 ## 📏 Accuracy
 
 Measured against JPL Horizons (`QUANTITIES=31`, light-time-corrected), across 1900–2050–2100:
