@@ -52,6 +52,17 @@ export function bodyName(internal: string, lang: Lang): string {
   return table[internal] ?? internal;
 }
 
+/**
+ * Display names for the two angles (v2: synastry/transits aspect the
+ * Ascendant/Midheaven directly, which calculate_natal's own aspect list
+ * never needed to name since it never includes them).
+ */
+const ANGLE_ZH: Record<'Ascendant' | 'Midheaven', string> = { Ascendant: '上升', Midheaven: '天顶' };
+
+export function angleName(internal: 'Ascendant' | 'Midheaven', lang: Lang): string {
+  return lang === 'zh' ? ANGLE_ZH[internal] : internal;
+}
+
 /** Aspect names are already Chinese at the source (src/core/aspects.ts); map back to English on request. */
 const ASPECT_EN: Record<string, string> = {
   合: 'Conjunction', 六合: 'Sextile', 刑: 'Square', 拱: 'Trine', 冲: 'Opposition',
@@ -97,6 +108,18 @@ export const OMISSION_REASONS: Record<string, { zh: string; en: string }> = {
   'aspects[].applying': {
     zh: '入相位判定需要精确时刻的相对速度',
     en: 'Determining whether an aspect is applying needs the relative speed at a precise moment.',
+  },
+  'overlays.aInB': {
+    zh: 'A 的天体落宫需要 B 的十二宫位，而 B 出生时间未知',
+    en: "Placing A's bodies into B's houses needs B's twelve houses, and B's birth time is unknown.",
+  },
+  'overlays.bInA': {
+    zh: 'B 的天体落宫需要 A 的十二宫位，而 A 出生时间未知',
+    en: "Placing B's bodies into A's houses needs A's twelve houses, and A's birth time is unknown.",
+  },
+  'transiting[].natalHouse': {
+    zh: '行运天体落入本命第几宫需要本命的十二宫位，而本命出生时间未知',
+    en: 'Which natal house a transiting body falls in needs the natal twelve houses, and the natal birth time is unknown.',
   },
 };
 

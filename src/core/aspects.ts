@@ -195,3 +195,52 @@ export function computeCrossAspects(
   }
   return results;
 }
+
+/** Same shape as `Aspect`, except an uncertain source reports a range instead
+ * of a single orb, and `applying` is present only when both sides are exact
+ * (see `robustCrossAspects`). */
+export interface CrossAspect {
+  body1: string;
+  body2: string;
+  aspect: string;
+  orb?: number;
+  orbRange?: [number, number];
+  applying?: boolean;
+}
+
+/**
+ * `computeCrossAspects`, but honest about an unknown time on either side:
+ * each side may be a single exact snapshot OR a pair of snapshots bracketing
+ * a day/window (spec 4.3's "must hold at every endpoint" rule, extended from
+ * one chart to two). An aspect survives only if it appears in EVERY
+ * (fromSnapshot, toSnapshot) combination; its orb is a single number when
+ * there was only one combination to check, otherwise a [min, max] range.
+ * `applying` needs a genuine instant on both sides, so it is only kept in
+ * the single-combination case.
+ */
+export function robustCrossAspects(
+  fromSnapshots: AspectPosition[][],
+  toSnapshots: AspectPosition[][],
+  opts: AspectOptions
+): CrossAspect[] {
+  const keyOf = (a: Aspect) => `${a.body1}|${a.body2}|${a.aspect}`;
+  const perCombo = fromSnapshots.flatMap((f) => toSnapshots.map((t) => computeCrossAspects(f, t, opts)));
+  if (perCombo.length === 0) return [];
+
+  const maps = perCombo.map((asps) => new Map(asps.map((a) => [keyOf(a), a])));
+  const survivingKeys = [...maps[0].keys()].filter((k) => maps.every((m) => m.has(k)));
+  const uniform = perCombo.length === 1;
+
+  return survivingKeys.map((k) => {
+    const instances = maps.map((m) => m.get(k)!);
+    const orbs = instances.map((a) => a.orb);
+    return {
+      body1: instances[0].body1,
+      body2: instances[0].body2,
+      aspect: instances[0].aspect,
+      ...(uniform
+        ? { orb: orbs[0], applying: instances[0].applying }
+        : { orbRange: [Math.min(...orbs), Math.max(...orbs)] as [number, number] }),
+    };
+  });
+}
