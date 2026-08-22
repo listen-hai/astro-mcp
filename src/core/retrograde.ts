@@ -11,6 +11,7 @@
  */
 import { bodyLongitude, bodySpeed } from '../ephemeris/engine';
 import { signIndexOf, signNameByIndex, type Lang } from './i18n';
+import { assertValidCalendarDate } from './time';
 
 const MS_PER_DAY = 86_400_000;
 const MAX_WINDOW_YEARS = 5;
@@ -35,7 +36,11 @@ export interface CalendarDate {
 }
 
 export interface RetrogradeInput {
-  body: RetrogradeBody | string;
+  // NOT `RetrogradeBody | string` -- a literal union widens to plain `string`
+  // the moment it is unioned with `string`, silently losing every bit of the
+  // enum's own type-checking. The schema layer (RetrogradeInputSchema) is the
+  // real enforcement; the runtime checks below cover callers that bypass it.
+  body: RetrogradeBody;
   from: CalendarDate;
   to: CalendarDate;
   lang?: Lang;
@@ -107,6 +112,12 @@ export function findRetrograde(input: RetrogradeInput): RetrogradeResult {
   if (!(RETROGRADE_BODIES as readonly string[]).includes(input.body)) {
     throw new Error(`Unknown or unsupported body for retrograde search: "${input.body}".`);
   }
+
+  // Refuse a calendar date that does not exist (e.g. 2026-02-30) rather than
+  // let `Date.UTC` silently roll it forward -- the same guard `buildCtx`
+  // (chart.ts) applies to `calculate_natal`'s own `solarDate`.
+  assertValidCalendarDate(input.from.year, input.from.month, input.from.day);
+  assertValidCalendarDate(input.to.year, input.to.month, input.to.day);
 
   const fromMs = dateMs(input.from);
   const toMs = dateMs(input.to);
