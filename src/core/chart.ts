@@ -53,9 +53,9 @@ const MAJOR_BODIES = [
   'Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto',
 ] as const;
 const ASTEROIDS = ['Ceres', 'Pallas', 'Juno', 'Vesta'] as const;
-const POINTS: readonly PointName[] = ['NorthNode', 'SouthNode', 'Lilith'];
+export const POINTS: readonly PointName[] = ['NorthNode', 'SouthNode', 'Lilith'];
 
-function bodyList(chironOn: boolean, asteroidsOn: boolean): string[] {
+export function bodyList(chironOn: boolean, asteroidsOn: boolean): string[] {
   return [
     ...MAJOR_BODIES,
     ...(chironOn ? ['Chiron'] : []),
@@ -63,7 +63,7 @@ function bodyList(chironOn: boolean, asteroidsOn: boolean): string[] {
   ];
 }
 
-interface RawPos {
+export interface RawPos {
   lon: number;
   lat: number;
   dec: number;
@@ -71,7 +71,7 @@ interface RawPos {
 }
 
 /** Raw (tropical, unconverted) geocentric position for any body this project supports. */
-function rawBodyPosition(name: string, date: Date): RawPos {
+export function rawBodyPosition(name: string, date: Date): RawPos {
   if ((MAJOR_BODIES as readonly string[]).includes(name)) {
     return {
       lon: bodyLongitude(name, date),
@@ -92,7 +92,7 @@ function obliquityAt(date: Date): number {
   return obliquity(A.MakeTime(date));
 }
 
-function anglesAndHousesAt(
+export function anglesAndHousesAt(
   date: Date,
   loc: Location,
   system: HouseSystem,
@@ -114,7 +114,7 @@ function anglesAndHousesAt(
 }
 
 /** Shared, mode-independent setup: conventions, location, the body list, and the diagnostics fields common to every mode. */
-interface Ctx {
+export interface Ctx {
   houseSystem: HouseSystem;
   zodiac: Zodiac;
   node: 'true' | 'mean';
@@ -135,7 +135,7 @@ interface Ctx {
   diagnosticsBase: Record<string, unknown>;
 }
 
-function buildCtx(input: AstroInput): Ctx {
+export function buildCtx(input: AstroInput): Ctx {
   const houseSystem = (input.houseSystem ?? ASTRO_DEFAULTS.houseSystem) as HouseSystem;
   const zodiac = (input.zodiac ?? ASTRO_DEFAULTS.zodiac) as Zodiac;
   const node = (input.node ?? ASTRO_DEFAULTS.node) as 'true' | 'mean';
@@ -475,7 +475,7 @@ function candidateList(segs: SignSegment[], lang: Lang, timezone: string) {
  * around: no house spans 180 deg, so equal endpoints plus more than half a
  * turn of sweep means every house was crossed.
  */
-function houseRangeCandidates(house0: number, house1: number, fullTurn = false): number[] {
+export function houseRangeCandidates(house0: number, house1: number, fullTurn = false): number[] {
   if (fullTurn) return Array.from({ length: 12 }, (_, i) => i + 1);
   const out: number[] = [house0];
   let h = house0;

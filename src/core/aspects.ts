@@ -97,55 +97,101 @@ function isApplying(p1: AspectPosition, p2: AspectPosition, angle: number, orbNo
   return orbNext < orbNow;
 }
 
-export function computeAspects(positions: AspectPosition[], opts: AspectOptions): Aspect[] {
-  const defs = [...MAJOR_ASPECTS, ...(opts.minorAspects ? MINOR_ASPECTS : [])];
-  const declinationOrb = opts.declinationOrb ?? 1;
-
-  // Reject unknown orb keys rather than ignoring them. A typo like
-  // { conjuction: 10 } would otherwise leave the default silently in place and
-  // the caller would believe their convention had been applied.
-  for (const key of Object.keys(opts.orbs ?? {})) {
+/** Throws on any orb-override key not in ORB_KEYS -- shared by both aspect entry points below. */
+function assertKnownOrbKeys(orbs?: Partial<Record<string, number>>): void {
+  for (const key of Object.keys(orbs ?? {})) {
     if (!ORB_KEYS.includes(key)) {
       throw new Error(
         `Unknown aspect in \`orbs\`: "${key}". Valid keys: ${ORB_KEYS.join(', ')}.`
       );
     }
   }
-  const results: Aspect[] = [];
+}
 
+/** Every aspect (major/minor + declination) found between one specific pair of positions. */
+function aspectsForPair(
+  p1: AspectPosition,
+  p2: AspectPosition,
+  defs: AspectDef[],
+  opts: AspectOptions,
+  declinationOrb: number
+): Aspect[] {
+  const results: Aspect[] = [];
+  const sep = separation(p1.lon, p2.lon);
+
+  for (const def of defs) {
+    const orb = opts.orbs?.[def.key] ?? def.orb;
+    const delta = Math.abs(sep - def.angle);
+    if (delta <= orb) {
+      results.push({
+        body1: p1.body,
+        body2: p2.body,
+        aspect: def.name,
+        orb: delta,
+        applying: isApplying(p1, p2, def.angle, delta),
+      });
+      break; // aspect windows never overlap given the orbs above
+    }
+  }
+
+  if (opts.declinationAspects) {
+    const parallelOrb = Math.abs(p1.dec - p2.dec);
+    const contraOrb = Math.abs(p1.dec + p2.dec);
+    if (parallelOrb <= declinationOrb) {
+      results.push({ body1: p1.body, body2: p2.body, aspect: '平行', orb: parallelOrb });
+    } else if (contraOrb <= declinationOrb) {
+      results.push({ body1: p1.body, body2: p2.body, aspect: '反平行', orb: contraOrb });
+    }
+  }
+
+  return results;
+}
+
+export function computeAspects(positions: AspectPosition[], opts: AspectOptions): Aspect[] {
+  const defs = [...MAJOR_ASPECTS, ...(opts.minorAspects ? MINOR_ASPECTS : [])];
+  const declinationOrb = opts.declinationOrb ?? 1;
+  assertKnownOrbKeys(opts.orbs);
+
+  const results: Aspect[] = [];
   for (let i = 0; i < positions.length; i++) {
     for (let j = i + 1; j < positions.length; j++) {
       const p1 = positions[i];
       const p2 = positions[j];
+      // Same-chart North/South Node axis is a construction, not information
+      // (see isNodeAxis) -- this exclusion only holds WITHIN one chart, so
+      // computeCrossAspects below (two different charts/epochs) does not apply it.
       if (isNodeAxis(p1.id, p2.id)) continue;
-      const sep = separation(p1.lon, p2.lon);
-
-      for (const def of defs) {
-        const orb = opts.orbs?.[def.key] ?? def.orb;
-        const delta = Math.abs(sep - def.angle);
-        if (delta <= orb) {
-          results.push({
-            body1: p1.body,
-            body2: p2.body,
-            aspect: def.name,
-            orb: delta,
-            applying: isApplying(p1, p2, def.angle, delta),
-          });
-          break; // aspect windows never overlap given the orbs above
-        }
-      }
-
-      if (opts.declinationAspects) {
-        const parallelOrb = Math.abs(p1.dec - p2.dec);
-        const contraOrb = Math.abs(p1.dec + p2.dec);
-        if (parallelOrb <= declinationOrb) {
-          results.push({ body1: p1.body, body2: p2.body, aspect: '平行', orb: parallelOrb });
-        } else if (contraOrb <= declinationOrb) {
-          results.push({ body1: p1.body, body2: p2.body, aspect: '反平行', orb: contraOrb });
-        }
-      }
+      results.push(...aspectsForPair(p1, p2, defs, opts, declinationOrb));
     }
   }
+  return results;
+}
 
+/**
+ * Aspects strictly BETWEEN two position lists (every `from` paired with every
+ * `to`), never within either list -- the shape synastry (person A vs person B)
+ * and transits (transiting sky vs natal chart) both need. `body1` is always
+ * from `from`, `body2` always from `to`, so callers can rely on that order.
+ *
+ * No North/South Node-axis exclusion here: that 180-degree relationship is
+ * guaranteed only within a single chart's own node line at one instant --
+ * across two different charts/epochs, node-vs-node is a real, informative
+ * aspect, not a mathematical certainty.
+ */
+export function computeCrossAspects(
+  from: AspectPosition[],
+  to: AspectPosition[],
+  opts: AspectOptions
+): Aspect[] {
+  const defs = [...MAJOR_ASPECTS, ...(opts.minorAspects ? MINOR_ASPECTS : [])];
+  const declinationOrb = opts.declinationOrb ?? 1;
+  assertKnownOrbKeys(opts.orbs);
+
+  const results: Aspect[] = [];
+  for (const p1 of from) {
+    for (const p2 of to) {
+      results.push(...aspectsForPair(p1, p2, defs, opts, declinationOrb));
+    }
+  }
   return results;
 }
