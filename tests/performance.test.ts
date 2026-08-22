@@ -20,7 +20,10 @@ const MAX_SPAN_YEARS = 11;   // seeds every 20 years => at most ~10, plus slack
 
 test('seeds cover many epochs, not just J2000', () => {
   for (const body of SMALL_BODIES) {
-    const epochs = Object.keys((seeds as Record<string, Record<string, unknown>>)[body]);
+    // seeds.json also carries a top-level `_comment` string, so the value type
+    // is not uniform -- go through `unknown` rather than asserting one.
+    const table = seeds as unknown as Record<string, Record<string, unknown>>;
+    const epochs = Object.keys(table[body]);
     expect(epochs.length).toBeGreaterThanOrEqual(10);
   }
 });
