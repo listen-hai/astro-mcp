@@ -13,6 +13,7 @@ import {
   SynastryInputSchema,
   TransitsInputSchema,
   RetrogradeInputSchema,
+  SYNASTRY_CONVENTION_KEYS,
 } from '../schemas/input';
 import { computeChart } from '../core/chart';
 import { computeSynastry } from '../core/synastry';
@@ -184,6 +185,10 @@ const natalPropertiesRaw: Record<string, object> = {
     type: 'boolean',
     description: 'Include Chiron. On by default -- standard in modern psychological astrology and has real Chinese social-media traction.',
   },
+  southNodeAspects: {
+    type: 'boolean',
+    description: 'Include aspects to the South Node. Off by default -- the South Node sits exactly 180deg from the North Node, so any aspect to it automatically mirrors one to the North Node at the same orb (astro.com/astro-seek/TimePassages/爱星盘 all hide it by default). The South Node\'s own sign/house/overlay position is unaffected -- only its aspects.',
+  },
   lang: {
     type: 'string',
     enum: ['zh', 'en'],
@@ -202,16 +207,16 @@ const natalProperties: Record<string, object> = Object.fromEntries(
 // fields any more than calculate_natal's own schema can drift from its zod.
 // ---------------------------------------------------------------------------
 
-const SYNASTRY_CONVENTION_KEYS = [
-  'houseSystem', 'zodiac', 'node', 'lilith', 'orbs',
-  'minorAspects', 'declinationAspects', 'asteroids', 'chiron', 'lang',
-] as const;
-
+// Person schemas reject the convention keys outright (see SynastryPersonSchema
+// in schemas/input.ts) -- the advertised per-person properties must match, or
+// a caller would see a field advertised that the schema then rejects.
 const personProperty = (label: 'A' | 'B'): object => ({
   type: 'object',
-  description: `Person ${label}'s birth data -- identical shape to calculate_natal's own input, including its unknown-birth-time behavior.`,
+  description: `Person ${label}'s birth data -- identical shape to calculate_natal's own input, minus the convention switches (houseSystem/zodiac/node/lilith/orbs/minorAspects/declinationAspects/asteroids/chiron/southNodeAspects/lang): those apply to both charts and are only accepted at the top level, see below.`,
   additionalProperties: false,
-  properties: { ...natalProperties },
+  properties: Object.fromEntries(
+    Object.entries(natalProperties).filter(([key]) => !(SYNASTRY_CONVENTION_KEYS as readonly string[]).includes(key))
+  ),
   required: ['solarDate'],
 });
 
@@ -266,8 +271,9 @@ const TOOLS: Tool[] = [
   {
     name: 'calculate_synastry',
     description:
-      'Synastry (合盘): aspects and house overlays BETWEEN two natal charts, `personA` and `personB` -- this is a comparison, not a single natal chart (call calculate_natal for that). Both people accept the exact same birth-input contract as calculate_natal, including its unknown-birth-time behavior (NEVER fabricates a birth time). The convention switches (houseSystem/zodiac/node/lilith/orbs/minorAspects/declinationAspects/asteroids/chiron/lang) apply to BOTH charts and are reported once, in the top-level `diagnostics` -- not per person. '
-      + 'House overlays are DIRECTIONAL: `overlays.aInB` places A\'s bodies into B\'s houses, which needs B to have an exact birth time (so B\'s twelve houses exist); `overlays.bInA` is the reverse. If either side\'s time is unknown, only the overlay that needed THAT side\'s houses is omitted (see `diagnostics.omitted`) -- the other direction still returns normally. Ascendant/Midheaven aspects only exist for whichever side has an exact time. Any aspect touching a Moon on an unknown-time side is flagged `uncertain: true` (the Moon moves 12-15 deg/day). `applying` is never included in the aspect list -- two natal charts are each frozen at their own birth instant, so "approaching exactness" across two different epochs is not a meaningful thing to report.',
+      'Synastry (合盘): aspects and house overlays BETWEEN two natal charts, `personA` and `personB` -- this is a comparison, not a single natal chart (call calculate_natal for that). Both people accept the same birth-input contract as calculate_natal (place/longitude/latitude/timezone/dstFold/solarDate/clockTime(-Range)), including its unknown-birth-time behavior (NEVER fabricates a birth time) -- EXCEPT the convention switches (houseSystem/zodiac/node/lilith/orbs/minorAspects/declinationAspects/asteroids/chiron/southNodeAspects/lang), which `personA`/`personB` do NOT accept at all (rejected outright, not silently ignored): those apply to BOTH charts uniformly and are set and reported once, in the top-level `diagnostics`, never per person. '
+      + 'A time WINDOW (`clockTimeRange`) on either side degrades that side\'s houses to a candidate list rather than deleting them: `overlays.*.houseCandidates` and `transiting[].natalHouseCandidates`-style degradation (see calculate_natal\'s own `clockTimeRange` behavior) -- only a whole-day-unknown side loses its houses entirely. '
+      + 'House overlays are DIRECTIONAL: `overlays.aInB` places A\'s bodies into B\'s houses, which needs B to have at least a known birth time (exact or a window); `overlays.bInA` is the reverse. If either side\'s time is entirely unknown (date-only), only the overlay that needed THAT side\'s houses is omitted (see `diagnostics.omitted`) -- the other direction still returns normally. Ascendant/Midheaven aspects only exist for whichever side has an exact time. Any aspect touching a Moon on an unknown-time side is flagged `uncertain: true` (the Moon moves 12-15 deg/day). `applying` is never included in the aspect list -- two natal charts are each frozen at their own birth instant, so "approaching exactness" across two different epochs is not a meaningful thing to report.',
     inputSchema: {
       type: 'object',
       properties: { ...synastryProperties },
@@ -279,7 +285,7 @@ const TOOLS: Tool[] = [
     name: 'calculate_transits',
     description:
       'Transits (行运): where the sky stands RIGHT NOW (or at any given instant) against a natal chart. Takes the exact same flat birth-input fields as calculate_natal (place/longitude/latitude/timezone/dstFold/solarDate/clockTime(-Range)) plus an optional `target`: the instant to compute the transiting sky for (`target.solarDate` and `target.clockTime` are both required together if `target` is given at all). Omitting `target` entirely defaults to the current instant ("now") -- see `diagnostics.targetSource`/`diagnostics.targetUtc`. A `target` before the birth instant is rejected: a transit only makes sense against a chart that already exists. '
-      + 'The transiting sky is always exact (the target instant is always known) -- ALL degradation is on the NATAL side. If the natal birth time is unknown, `transiting[].natalHouse` is OMITTED from every entry (not null; see `diagnostics.omitted`) and aspects to the natal Ascendant/Midheaven are absent, but planet-to-planet aspects to the natal chart still work -- any surviving aspect touching the natal Moon is flagged `uncertain: true` (the Moon moves 12-15 deg/day, so an imprecise birth time means an imprecise natal Moon).',
+      + 'The transiting sky is always exact (the target instant is always known) -- ALL degradation is on the NATAL side. A natal time WINDOW (`clockTimeRange`) degrades `transiting[].natalHouse` to `transiting[].natalHouseCandidates` (a candidate list, spec mode B) rather than deleting it. Only an entirely unknown (date-only) natal birth time OMITS `transiting[].natalHouse` from every entry (not null; see `diagnostics.omitted`) and drops aspects to the natal Ascendant/Midheaven -- planet-to-planet aspects to the natal chart still work either way, and any surviving aspect touching the natal Moon is flagged `uncertain: true` when the natal time is not exact (the Moon moves 12-15 deg/day).',
     inputSchema: {
       type: 'object',
       properties: { ...transitsProperties },

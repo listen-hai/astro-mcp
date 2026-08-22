@@ -16,6 +16,7 @@ export const ASTRO_DEFAULTS = {
   declinationAspects: false,
   asteroids: false,
   chiron: true,
+  southNodeAspects: false,
   lang: 'zh',
 } as const;
 
@@ -91,6 +92,11 @@ export const AstroInputObjectSchema = z
     declinationAspects: z.boolean().default(false),
     asteroids: z.boolean().default(false),
     chiron: z.boolean().default(true),
+    southNodeAspects: z.boolean().default(false)
+      .describe('Include aspects to the South Node. Off by default -- the South Node sits exactly '
+        + '180deg from the North Node, so any aspect to it automatically mirrors one to the North '
+        + 'Node at the same orb (astro.com/astro-seek/TimePassages/爱星盘 all hide it by default). '
+        + 'The South Node\'s own sign/house/overlay position is unaffected -- only its aspects.'),
     lang: z.enum(['zh', 'en']).default('zh'),
   })
   .strict();
@@ -131,17 +137,48 @@ export type LookupLocationInput = z.input<typeof LookupLocationSchema>;
 // ---------------------------------------------------------------------------
 
 /**
- * `calculate_synastry`'s input: two natal charts (each the full natal-input
- * shape, so `AstroInputSchema`'s own validation applies to both) plus the
- * house-system/zodiac/node/lilith/orbs/lang convention switches, which apply
- * to BOTH charts and are reported once at the top level (spec: "口径开关...
- * 只在顶层 diagnostics 报一次") -- reused directly off `AstroInputObjectSchema`'s
- * own field definitions so the two tools cannot drift apart.
+ * The house-system/zodiac/node/lilith/orbs/minorAspects/declinationAspects/
+ * asteroids/chiron/southNodeAspects/lang convention switches. Synastry accepts
+ * these ONLY at the top level -- they apply to BOTH charts and are reported
+ * once (spec: "口径开关...只在顶层 diagnostics 报一次"). A per-person `houseSystem`
+ * used to be silently overridden by the top-level default (every convention
+ * field but `orbs` has a zod `.default()`, so the top-level value is never
+ * `undefined`) while a per-person `orbs` leaked the other way -- into the
+ * cross-aspects while that person's own natal chart kept the default,
+ * contradicting the single `diagnostics.orbs` table. Rather than patch the
+ * merge logic, the per-person schema omits these keys entirely (`.strict()`
+ * then rejects them outright): a convention cannot be set somewhere it is
+ * silently ignored or misapplied if the schema does not accept it there.
+ */
+export const SYNASTRY_CONVENTION_KEYS = [
+  'houseSystem', 'zodiac', 'node', 'lilith', 'orbs',
+  'minorAspects', 'declinationAspects', 'asteroids', 'chiron', 'southNodeAspects', 'lang',
+] as const;
+
+export const SynastryPersonSchema = AstroInputObjectSchema.omit({
+  houseSystem: true, zodiac: true, node: true, lilith: true, orbs: true,
+  minorAspects: true, declinationAspects: true, asteroids: true, chiron: true,
+  southNodeAspects: true, lang: true,
+}).strict();
+
+export type SynastryPersonInput = z.infer<typeof SynastryPersonSchema>;
+
+/**
+ * `calculate_synastry`'s input: two natal charts (each the natal-input shape
+ * minus the convention switches -- see `SynastryPersonSchema` above) plus
+ * those convention switches once at the top level -- reused directly off
+ * `AstroInputObjectSchema`'s own field definitions so the two tools cannot
+ * drift apart.
  */
 export const SynastryInputSchema = z
   .object({
-    personA: AstroInputObjectSchema.describe("Person A's birth data (same shape as calculate_natal's input)"),
-    personB: AstroInputObjectSchema.describe("Person B's birth data (same shape as calculate_natal's input)"),
+    personA: SynastryPersonSchema.describe(
+      "Person A's birth data -- same shape as calculate_natal's input, minus the convention "
+      + 'switches (houseSystem/zodiac/node/lilith/orbs/minorAspects/declinationAspects/asteroids/'
+      + 'chiron/southNodeAspects/lang): those apply to both charts and are only accepted below, '
+      + 'at the top level.'
+    ),
+    personB: SynastryPersonSchema.describe("Person B's birth data (same shape as personA)"),
     houseSystem: AstroInputObjectSchema.shape.houseSystem,
     zodiac: AstroInputObjectSchema.shape.zodiac,
     node: AstroInputObjectSchema.shape.node,
@@ -151,6 +188,7 @@ export const SynastryInputSchema = z
     declinationAspects: AstroInputObjectSchema.shape.declinationAspects,
     asteroids: AstroInputObjectSchema.shape.asteroids,
     chiron: AstroInputObjectSchema.shape.chiron,
+    southNodeAspects: AstroInputObjectSchema.shape.southNodeAspects,
     lang: AstroInputObjectSchema.shape.lang,
   })
   .strict()
