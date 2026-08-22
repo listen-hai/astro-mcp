@@ -187,6 +187,22 @@ Candidates carry identifying fields only. **Population is deliberately absent** 
 
 Call `lookup_location` first when a name might be ambiguous; it is cheaper than a refused chart call.
 
+## 🧭 What this server will not tell you
+
+**It calculates; it does not infer.** Positions, cusps, aspects, dignities and
+combinations are table lookups and astronomy — any correct implementation reaches
+the same answer. Interpretation is not, and this server does not attempt it: no
+compatibility scores, no "strong/weak" verdicts, no rankings, nothing that would
+rest on a weight invented here.
+
+The one place a convention is unavoidable — orbs — is a declared input rather
+than a hidden judgment: the defaults are the common modern set, every one is
+overridable via `orbs`, and the table actually applied comes back in
+`diagnostics.orbs`. Given the same orbs, any implementation agrees.
+
+Bring your own interpretive layer, or an astrology knowledge base. The facts are
+all here, and the facts are the part that can be got right.
+
 ## 📏 Accuracy
 
 Measured against JPL Horizons (`QUANTITIES=31`, light-time-corrected), across 1900–2050–2100:
