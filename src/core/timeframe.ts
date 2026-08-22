@@ -60,11 +60,17 @@ export interface PersonFrame {
   exact: boolean;
   /** One snapshot if the birth time is exact; two (bracketing the day/window) otherwise. */
   snapshots: Map<string, RawPos>[];
-  /** Raw (tropical) house cusps -- present only when the birth time is exact. */
-  cusps?: number[];
+  /**
+   * Raw (tropical) house cusps, one set per snapshot instant: length 1 when
+   * the birth time is exact, length 2 for a known time WINDOW (spec 4.3 mode
+   * B -- houses degrade to a candidate list, they do not disappear). Absent
+   * only for a whole-day window (mode C): a full day is too wide to say
+   * anything about houses at all.
+   */
+  cusps?: number[][];
 }
 
-/** Builds one person's raw frame -- snapshot(s) of every body/point, angles/cusps only when exact. */
+/** Builds one person's raw frame -- snapshot(s) of every body/point, angles/cusps whenever an exact instant or a bounded window is known. */
 export function buildFrame(input: AstroInput, ctx: Ctx): PersonFrame {
   const instants = resolveInstants(input, ctx);
   if (instants.mode === 'exact') {
@@ -75,9 +81,15 @@ export function buildFrame(input: AstroInput, ctx: Ctx): PersonFrame {
     // a point that (unlike a body) has no real ecliptic latitude of its own.
     raw.set('Ascendant', { lon: ascendant, lat: 0, dec: NaN, speed: 0 });
     raw.set('Midheaven', { lon: midheaven, lat: 0, dec: NaN, speed: 0 });
-    return { exact: true, snapshots: [raw], cusps: houses.cusps };
+    return { exact: true, snapshots: [raw], cusps: [houses.cusps] };
   }
-  return { exact: false, snapshots: [snapshotRaw(ctx, instants.t0), snapshotRaw(ctx, instants.t1)] };
+  const snapshots = [snapshotRaw(ctx, instants.t0), snapshotRaw(ctx, instants.t1)];
+  if (instants.mode === 'range') {
+    const cusps0 = anglesAndHousesAt(instants.t0, ctx.loc, ctx.houseSystem, ctx.zodiac).houses.cusps;
+    const cusps1 = anglesAndHousesAt(instants.t1, ctx.loc, ctx.houseSystem, ctx.zodiac).houses.cusps;
+    return { exact: false, snapshots, cusps: [cusps0, cusps1] };
+  }
+  return { exact: false, snapshots };
 }
 
 /** A raw snapshot as the `AspectPosition[]` shape `computeAspects`/`computeCrossAspects` need. */

@@ -16,14 +16,14 @@
  *     the natal time is not exact -- the Moon moves 12-15 deg/day.
  */
 import type { AstroInput } from '../schemas/input';
-import { computeChart, buildCtx, rawBodyPosition, POINTS, type AstroChart } from './chart';
+import { computeChart, buildCtx, rawBodyPosition, POINTS, houseRangeCandidates, type AstroChart } from './chart';
 import { pointPosition } from '../ephemeris/points';
 import { houseOfLongitude } from './output';
 import { robustCrossAspects, type CrossAspect } from './aspects';
 import { bodyName, signOfLongitude, omissionReason } from './i18n';
 import { toZodiac } from '../ephemeris/vendor/sidereal';
 import { formatDegree } from './output';
-import { wallToUtc } from './time';
+import { wallToUtc, assertValidCalendarDate } from './time';
 import { resolveInstants, buildFrame, toAspectPositions } from './timeframe';
 
 interface CalendarDate {
@@ -54,6 +54,10 @@ export function computeTransits(input: TransitsInput): AstroChart {
   let targetSource: 'given' | 'now';
   if (input.target) {
     const { solarDate, clockTime, dstFold } = input.target;
+    // Refuse a calendar date that does not exist (e.g. 2026-02-30) exactly as
+    // `calculate_natal` does for `solarDate` -- the same guard, applied here
+    // to the transit target instant.
+    assertValidCalendarDate(solarDate.year, solarDate.month, solarDate.day);
     targetUtc = wallToUtc(
       solarDate.year, solarDate.month, solarDate.day, clockTime.hour, clockTime.minute, ctx.timezone, dstFold ?? 0
     );
@@ -80,10 +84,28 @@ export function computeTransits(input: TransitsInput): AstroChart {
 
   const natalFrame = buildFrame(input, ctx);
   const natalExact = natalFrame.exact;
-  const natalCusps = natalFrame.cusps;
+  // `cusps` is a list of one raw cusp set (exact birth time) or two bracketing
+  // a known window (spec 4.3 mode B) -- absent only for a whole-day window
+  // (mode C, too wide to say anything about houses at all). The transiting
+  // body is always a single fixed position (the target instant is exact by
+  // construction); with two natal cusp sets the same body falls in different
+  // houses at each end of the window -- a natal-house DEGRADES to a candidate
+  // list rather than disappearing, mirroring how `chart.ts`'s own mode-B
+  // range handles a fixed body against moving house-heads.
+  const natalCuspsList = natalFrame.cusps;
 
   const transitingPositions = transiting.map(({ name, raw }) => {
     const disp = toZodiac(raw.lon, ctx.zodiac, targetUtc);
+    const houseField = !natalCuspsList
+      ? {}
+      : natalCuspsList.length === 1
+        ? { natalHouse: houseOfLongitude(raw.lon, natalCuspsList[0]) }
+        : {
+            natalHouseCandidates: houseRangeCandidates(
+              houseOfLongitude(raw.lon, natalCuspsList[0]),
+              houseOfLongitude(raw.lon, natalCuspsList[1])
+            ),
+          };
     return {
       body: bodyName(name, ctx.lang),
       sign: signOfLongitude(disp, ctx.lang),
@@ -93,7 +115,7 @@ export function computeTransits(input: TransitsInput): AstroChart {
       declination: raw.dec,
       retrograde: raw.speed < 0,
       speed: raw.speed,
-      ...(natalCusps ? { natalHouse: houseOfLongitude(raw.lon, natalCusps) } : {}),
+      ...houseField,
     };
   });
 
@@ -112,7 +134,10 @@ export function computeTransits(input: TransitsInput): AstroChart {
     (s) => toAspectPositions(s, ctx.lang).map((p) => ({ ...p, speed: 0 }))
   );
 
-  const opts = { minorAspects: ctx.minorAspects, declinationAspects: ctx.declinationAspects, orbs: ctx.orbs };
+  const opts = {
+    minorAspects: ctx.minorAspects, declinationAspects: ctx.declinationAspects, orbs: ctx.orbs,
+    southNodeAspects: ctx.southNodeAspects,
+  };
   const moonName = bodyName('Moon', ctx.lang);
 
   const aspects = robustCrossAspects([transitingAspectPositions], natalSnapshots, opts).map((a: CrossAspect) => ({
@@ -125,7 +150,7 @@ export function computeTransits(input: TransitsInput): AstroChart {
   }));
 
   const omitted: { field: string; reason: string }[] = [];
-  if (!natalCusps) {
+  if (!natalCuspsList) {
     omitted.push({ field: 'transiting[].natalHouse', reason: omissionReason('transiting[].natalHouse', ctx.lang) });
   }
   if (natalSnapshots.length > 1) {
