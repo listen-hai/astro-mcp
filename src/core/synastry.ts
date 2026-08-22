@@ -16,12 +16,11 @@
  *     across two different epochs the way it does for a single chart.
  */
 import type { AstroInput } from '../schemas/input';
-import { computeChart, buildCtx, rawBodyPosition, POINTS, anglesAndHousesAt, type Ctx, type RawPos } from './chart';
-import { pointPosition } from '../ephemeris/points';
+import { computeChart, buildCtx, type AstroChart } from './chart';
 import { houseOfLongitude } from './output';
-import { computeCrossAspects, robustCrossAspects, type AspectPosition, type CrossAspect } from './aspects';
+import { robustCrossAspects, type CrossAspect } from './aspects';
 import { bodyName, angleName, omissionReason, type Lang } from './i18n';
-import { resolveInstants } from './timeframe';
+import { buildFrame, toAspectPositions, type PersonFrame } from './timeframe';
 
 type Conventions = Partial<Pick<AstroInput,
   'houseSystem' | 'zodiac' | 'node' | 'lilith' | 'orbs' |
@@ -47,47 +46,6 @@ function mergeConventions(person: AstroInput, input: SynastryInput): AstroInput 
   return { ...person, ...conv };
 }
 
-/** Raw (tropical, unconverted) position of every body/point this project supports, at one instant. */
-function snapshotRaw(ctx: Ctx, utc: Date): Map<string, RawPos> {
-  const m = new Map<string, RawPos>();
-  for (const name of ctx.bodies) m.set(name, rawBodyPosition(name, utc));
-  for (const point of POINTS) m.set(point, pointPosition(point, utc, { node: ctx.node, lilith: ctx.lilithKind }));
-  return m;
-}
-
-interface PersonFrame {
-  exact: boolean;
-  /** One snapshot if the birth time is exact; two (bracketing the day/window) otherwise. */
-  snapshots: Map<string, RawPos>[];
-  /** Raw (tropical) house cusps -- present only when the birth time is exact. */
-  cusps?: number[];
-}
-
-function buildFrame(input: AstroInput, ctx: Ctx): PersonFrame {
-  const instants = resolveInstants(input, ctx);
-  if (instants.mode === 'exact') {
-    const { ascendant, midheaven, houses } = anglesAndHousesAt(instants.utc, ctx.loc, ctx.houseSystem, ctx.zodiac);
-    const raw = snapshotRaw(ctx, instants.utc);
-    // NaN declination for the angles is deliberate: any comparison against NaN
-    // is false in JS, so a declination-aspect check never spuriously fires for
-    // a point that (unlike a body) has no real ecliptic latitude of its own.
-    raw.set('Ascendant', { lon: ascendant, lat: 0, dec: NaN, speed: 0 });
-    raw.set('Midheaven', { lon: midheaven, lat: 0, dec: NaN, speed: 0 });
-    return { exact: true, snapshots: [raw], cusps: houses.cusps };
-  }
-  return { exact: false, snapshots: [snapshotRaw(ctx, instants.t0), snapshotRaw(ctx, instants.t1)] };
-}
-
-function toAspectPositions(raw: Map<string, RawPos>, lang: Lang): AspectPosition[] {
-  return [...raw.entries()].map(([internal, pos]) => ({
-    body: internal === 'Ascendant' || internal === 'Midheaven' ? angleName(internal, lang) : bodyName(internal, lang),
-    lon: pos.lon,
-    dec: pos.dec,
-    speed: pos.speed,
-    id: internal,
-  }));
-}
-
 /** Every body/point (including the angles, when present) of `source` placed into `target`'s houses -- `null` if `target` has none. */
 function overlay(source: PersonFrame, target: PersonFrame, lang: Lang) {
   if (!target.cusps) return null;
@@ -103,7 +61,7 @@ function overlay(source: PersonFrame, target: PersonFrame, lang: Lang) {
   });
 }
 
-export function computeSynastry(input: SynastryInput) {
+export function computeSynastry(input: SynastryInput): AstroChart {
   const mergedA = mergeConventions(input.personA, input);
   const mergedB = mergeConventions(input.personB, input);
 
@@ -159,7 +117,3 @@ export function computeSynastry(input: SynastryInput) {
     },
   };
 }
-
-// computeCrossAspects is re-exported only for tests/tools that may want the
-// unconditional (non-degradation-aware) primitive directly.
-export { computeCrossAspects };
