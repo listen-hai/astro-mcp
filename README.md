@@ -122,7 +122,25 @@ Requires `solarDate` and a location (`place`, or `longitude` + `latitude` + `tim
 
 **Not supported:** a default of `clockTime: 12:00` when the birth time is unknown — see [The core promise](#-the-core-promise-never-fake-a-birth-time). There is no such default; omit `clockTime`/`clockTimeRange` entirely to get the honestly-degraded chart instead.
 
-### 2. `lookup_location`
+### 2. `calculate_synastry`
+
+合盘 — aspects and house overlays *between* two natal charts, `personA` and `personB` (each the exact same birth-input shape as `calculate_natal`, unknown-time behavior included). The convention switches (`houseSystem`/`zodiac`/`node`/`lilith`/`orbs`/`minorAspects`/`declinationAspects`/`asteroids`/`chiron`/`lang`) apply to **both** charts and are reported once, at the top-level `diagnostics` — not per person.
+
+House overlays are **directional**, the same "never fake a birth time" promise extended to a second chart: `overlays.aInB` places A's bodies into B's houses, which needs B's twelve houses — which need an exact birth time for B. If B's time is unknown, `overlays.aInB` is simply omitted (see `diagnostics.omitted`); `overlays.bInA` (needs only A's houses) still returns normally. Likewise, Ascendant/Midheaven aspects only exist for whichever side has an exact time, and any aspect touching a Moon on an unknown-time side is flagged `uncertain: true` (the Moon moves 12–15°/day). `applying` is never included in the aspect list — two natal charts are each frozen at their own birth instant, so "approaching exactness" across two different epochs isn't a meaningful thing to report.
+
+### 3. `calculate_transits`
+
+行运 — where the sky stands right now (or at any given instant) against a natal chart. Takes the exact same flat birth-input fields as `calculate_natal`, plus an optional `target: { solarDate, clockTime, dstFold? }`: the instant to compute the transiting sky for. Omit `target` entirely for "now" (`diagnostics.targetSource`/`diagnostics.targetUtc` say which). A `target` before the birth instant is rejected — that would not be a transit.
+
+The transiting sky is always exact (the target instant is always known); every degradation lives on the **natal** side. An unknown natal birth time omits `transiting[].natalHouse` from every entry (not `null` — an absent field) and drops aspects to the natal Ascendant/Midheaven, but planet-to-planet aspects to the natal chart still work; any surviving aspect touching the natal Moon is flagged `uncertain: true`.
+
+### 4. `find_retrograde`
+
+水逆 and friends — retrograde periods for one body within a calendar window (up to 5 years), with **no birth data at all**: a pure ephemeris query. Each period reports its exact station-retrograde/station-direct instants (`startsUtc`/`endsUtc`) and the zodiac sign the retrograde begins in (`startSign`).
+
+The Sun and Moon are refused outright — "Sun/Moon never retrograde" — rather than silently returning an empty period list, which would read as "not retrograde this window" instead of "this concept doesn't apply here". A window over 5 years is refused rather than grinding through a slow day-by-day scan; split it into smaller windows.
+
+### 5. `lookup_location`
 
 Resolves an English city name to longitude, latitude, and IANA timezone across 7,329 cities in 227 countries — the same database `ziwei-mcp`/`bazi-mcp` use. Same-named cities in different timezones (e.g. Springfield, or Cambridge UK vs Cambridge MA) are refused with the candidate list rather than guessed — **except** when one candidate's population dominates the other by 10x or more (e.g. "Los Angeles" resolves straight to the ~8.1M-population California city over a same-named ~135k-population town in Chile's Bío-Bío region); that dominance is reported in `mixedWarning` rather than applied silently.
 
@@ -184,7 +202,7 @@ What is **not** shared, on purpose: this project drops the true-solar-time corre
 - Five small bodies only (Chiron + Ceres/Pallas/Juno/Vesta), not the full minor-planet catalogue — the same code path, so more could be added.
 - No fixed stars, no Arabic parts beyond the Part of Fortune, no antiscia.
 - Two ayanamsas only (Lahiri, Fagan-Bradley) — Krishnamurti and others are not implemented.
-- No synastry, transits, progressions or returns yet — natal charts only.
+- Synastry and transits are implemented (`calculate_synastry`/`calculate_transits`); progressions and returns (solar/lunar) are not yet.
 
 ## 📜 License
 

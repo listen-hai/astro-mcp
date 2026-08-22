@@ -120,7 +120,25 @@ npx -y @lhk714/astro-mcp@latest
 
 **不支持**：出生时间未知时默认填 `clockTime: 12:00`——见上文「核心承诺」。本项目没有这个默认值；不提供 `clockTime`/`clockTimeRange` 即可得到诚实降级后的星盘。
 
-### 2. `lookup_location`
+### 2. `calculate_synastry`（合盘）
+
+计算两张本命盘**之间**的相位与宫位叠加：`personA`、`personB` 各自都是与 `calculate_natal` 完全相同的出生输入形状（未知时间的降级行为也一致）。口径开关（`houseSystem`/`zodiac`/`node`/`lilith`/`orbs`/`minorAspects`/`declinationAspects`/`asteroids`/`chiron`/`lang`）作用于**两张盘**，只在顶层 `diagnostics` 报一次，不按人分别报。
+
+宫位叠加是**有方向的**——「绝不伪造出生时间」这条核心承诺延伸到第二张盘上的自然结果：`overlays.aInB` 是把 A 的天体叠加进 B 的十二宫，这需要 B 有十二宫位，也就需要 B 有精确出生时间。B 的时间未知时，`overlays.aInB` 直接缺席（见 `diagnostics.omitted`）；`overlays.bInA`（只需要 A 的宫位）照常返回。同理，上升/天顶相位只对有精确时间的那一方存在；任何涉及未知时间一方月亮的相位都会标 `uncertain: true`（月亮一天走 12–15°）。相位列表里不出现 `applying`（入相位/出相位）——两张本命盘各自冻结在各自的出生瞬间，「正在趋向精确」这件事跨越两个不同的历史时刻并没有意义。
+
+### 3. `calculate_transits`（行运）
+
+计算此刻（或任意指定瞬间）的天空相对一张本命盘的状态。输入字段与 `calculate_natal` 完全相同的扁平出生字段，外加可选的 `target: { solarDate, clockTime, dstFold? }`——要计算行运的目标瞬间。省略 `target` 默认取「现在」（`diagnostics.targetSource`/`diagnostics.targetUtc` 会说明）。`target` 早于出生瞬间会报错——那已经不是「行运」了。
+
+行运星体永远精确（目标瞬间本来就是已知的）；所有的降级都发生在**本命**一侧。本命出生时间未知时，`transiting[].natalHouse` 从每一条记录里整体缺席（不是 `null`——是字段不存在），涉及本命上升/天顶的相位也不再出现；但行运星对本命星的相位照常给出，其中涉及本命月亮的相位会标 `uncertain: true`。
+
+### 4. `find_retrograde`（逆行期查询）
+
+查询某个天体在一段日历窗口（最长 5 年）内的逆行期——**完全不需要出生数据**，是一次纯粹的星历查询（如「水星逆行」）。每一段都给出精确的留退/留顺瞬间（`startsUtc`/`endsUtc`）与逆行起始所在的星座（`startSign`）。
+
+太阳与月亮会被直接拒绝——「太阳/月亮永不逆行」——而不是静默返回一个空列表；空列表看起来像「这段时间没有逆行」，那是假信息。窗口超过 5 年会被拒绝而不是硬跑一次很慢的逐日扫描；请拆成更小的窗口。
+
+### 5. `lookup_location`
 
 将英文城市名解析为经度、纬度与 IANA 时区，覆盖 227 个国家的 7,329 座城市——与 `ziwei-mcp`/`bazi-mcp` 使用同一数据库。不同时区的同名城市（如 Springfield，或英国剑桥 vs 美国剑桥）会拒绝并列出候选列表，而不是随意猜一个——**除非**某个候选的人口数量级压倒性超过另一个（≥10 倍，例如 "Los Angeles" 会直接解析到人口约 810 万的加州城市，而不是智利 Bío-Bío 大区一个同名、人口约 13.5 万的小镇）；这种情况下会在 `mixedWarning` 中明确说明，而非静默处理。
 
@@ -167,7 +185,7 @@ npx -y @lhk714/astro-mcp@latest
 - 仅五颗小天体（凯龙 + 谷神/智神/婚神/灶神），不含完整小行星表——同一条代码路径，需要时可以再加。
 - 不含恒星（fixed stars）、福点以外的阿拉伯点、映点（antiscia）。
 - 仅两种 ayanamsa（Lahiri、Fagan-Bradley）——Krishnamurti 等未实现。
-- 暂无合盘、行运、推运、返照盘——目前只做本命盘。
+- 合盘与行运已实现（`calculate_synastry`/`calculate_transits`）；推运（次限法等）与返照盘尚未实现。
 
 ## 📜 许可证
 
