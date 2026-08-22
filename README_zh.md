@@ -115,6 +115,7 @@ npx -y @lhk714/astro-mcp@latest
 | 容许度（orb） | 合/冲 8°，刑/拱 7°，六合 6°，次相位 2–3° | `orbs` 参数，逐相位覆写 | 现代惯例：容许度按**相位类型**定，而非按各星体自身光体（古典 moiety）定。容许度是整张盘里流派差异最大的一个数，默认值只是起点——可逐项覆写，实际生效的表会回写进 `diagnostics.orbs`。键名用英文（conjunction/sextile/square/trine/opposition/…），不随 `lang` 变化；写错的键会报错而不是被忽略。 |
 | `chiron`（凯龙） | `true` | `false` | 默认开启：现代心理占星的标配，在中文社交媒体上也有真实热度。 |
 | `asteroids`（谷神/智神/婚神/灶神） | `false` | `true` | 默认关闭：使用率较低；因为与凯龙共用同一条代码路径，仍用一个开关保留。 |
+| `southNodeAspects`（南交点相位） | `false` | `true` | 默认关闭：南交点与北交点严格相距 180°，对南交点的任何相位都必然有一条对北交点的镜像、容许度完全相同——两条都报只是把同一个事实翻倍，没有新信息（astro.com/astro-seek/TimePassages/爱星盘 均默认隐藏）。剔除是**镜像感知**的：如果某个相位角度的 180° 补角本身不在当前生效的相位集合里（例如五分相 72° 的补角 108° 不是任何已定义的相位），就不剔除——否则那条事实会整个消失，而不是去重。南交点自身的星座/宫位/宫位叠加不受影响，只影响它的相位。 |
 | 必然尊贵 | 仅庙/旺/陷/落四种 | —— | 现代占星从古典技法中保留的四层。三分性/界/面**不实现**（超出范围，见 §0）。外行星的庙旺归属（天王星→水瓶、海王星→双鱼、冥王星→天蝎）是现代惯例、非古典共识，输出中标注 `modern: true` 以便与古典七曜的归属区分。 |
 | `lang` | `"zh"` | `"en"` | 默认中文输出（星座、行星、相位、尊贵、诊断文案），与 `ziwei-mcp`/`bazi-mcp` 一致。 |
 
@@ -122,15 +123,17 @@ npx -y @lhk714/astro-mcp@latest
 
 ### 2. `calculate_synastry`（合盘）
 
-计算两张本命盘**之间**的相位与宫位叠加：`personA`、`personB` 各自都是与 `calculate_natal` 完全相同的出生输入形状（未知时间的降级行为也一致）。口径开关（`houseSystem`/`zodiac`/`node`/`lilith`/`orbs`/`minorAspects`/`declinationAspects`/`asteroids`/`chiron`/`lang`）作用于**两张盘**，只在顶层 `diagnostics` 报一次，不按人分别报。
+计算两张本命盘**之间**的相位与宫位叠加：`personA`、`personB` 各自都是与 `calculate_natal` 相同的出生输入字段（`place`/`longitude`/`latitude`/`timezone`/`dstFold`/`solarDate`/`clockTime`(-`Range`)，未知时间的降级行为也一致）——**但不接受**口径开关（`houseSystem`/`zodiac`/`node`/`lilith`/`orbs`/`minorAspects`/`declinationAspects`/`asteroids`/`chiron`/`southNodeAspects`/`lang`）：这些开关只在顶层设置一次，作用于**两张盘**，也只在顶层 `diagnostics` 报一次；在 `personA`/`personB` 里传它们会被直接拒绝，而不是静默忽略。（旧版本会让逐人的 `houseSystem` 通过校验、再被顶层默认值静默覆盖；逐人的 `orbs` 还会反过来泄漏进跨盘相位，而这个人自己的本命相位却仍用默认值——同一张 `diagnostics.orbs` 表因此描述了两种不同的计算结果。在口径根本不适用的地方直接拒收，才是真正的修法。）
 
-宫位叠加是**有方向的**——「绝不伪造出生时间」这条核心承诺延伸到第二张盘上的自然结果：`overlays.aInB` 是把 A 的天体叠加进 B 的十二宫，这需要 B 有十二宫位，也就需要 B 有精确出生时间。B 的时间未知时，`overlays.aInB` 直接缺席（见 `diagnostics.omitted`）；`overlays.bInA`（只需要 A 的宫位）照常返回。同理，上升/天顶相位只对有精确时间的那一方存在；任何涉及未知时间一方月亮的相位都会标 `uncertain: true`（月亮一天走 12–15°）。相位列表里不出现 `applying`（入相位/出相位）——两张本命盘各自冻结在各自的出生瞬间，「正在趋向精确」这件事跨越两个不同的历史时刻并没有意义。
+一个已知的时间**区间**（`clockTimeRange`）会让那一侧的宫位降级为**候选列表**，而不是整个消失——`overlays.aInB`/`overlays.bInA` 里对应条目会给出 `houseCandidates` 而不是单一的 `house`，与 `calculate_natal` 自己模式 B「降级、不删除」的承诺一致。只有整天都不知道出生时间（既没有 `clockTime` 也没有 `clockTimeRange`）的一侧，才会让那个方向的叠加整体缺席。
+
+宫位叠加是**有方向的**——「绝不伪造出生时间」这条核心承诺延伸到第二张盘上的自然结果：`overlays.aInB` 是把 A 的天体叠加进 B 的十二宫，这需要 B 至少有一个已知的出生时间（精确或区间）；`overlays.bInA` 反之。只有当某一侧的出生时间完全未知时，那个方向所需要的叠加才会缺席（见 `diagnostics.omitted`）——另一个方向照常返回。同理，上升/天顶相位只对有精确时间的那一方存在；任何涉及未知时间一方月亮的相位都会标 `uncertain: true`（月亮一天走 12–15°）。相位列表里不出现 `applying`（入相位/出相位）——两张本命盘各自冻结在各自的出生瞬间，「正在趋向精确」这件事跨越两个不同的历史时刻并没有意义。
 
 ### 3. `calculate_transits`（行运）
 
 计算此刻（或任意指定瞬间）的天空相对一张本命盘的状态。输入字段与 `calculate_natal` 完全相同的扁平出生字段，外加可选的 `target: { solarDate, clockTime, dstFold? }`——要计算行运的目标瞬间。省略 `target` 默认取「现在」（`diagnostics.targetSource`/`diagnostics.targetUtc` 会说明）。`target` 早于出生瞬间会报错——那已经不是「行运」了。
 
-行运星体永远精确（目标瞬间本来就是已知的）；所有的降级都发生在**本命**一侧。本命出生时间未知时，`transiting[].natalHouse` 从每一条记录里整体缺席（不是 `null`——是字段不存在），涉及本命上升/天顶的相位也不再出现；但行运星对本命星的相位照常给出，其中涉及本命月亮的相位会标 `uncertain: true`。
+行运星体永远精确（目标瞬间本来就是已知的）；所有的降级都发生在**本命**一侧。本命出生时间是已知**区间**（`clockTimeRange`）时，`transiting[].natalHouse` 降级为 `transiting[].natalHouseCandidates`（候选列表），而不是消失。只有本命出生时间完全未知（整天）时，`transiting[].natalHouse` 才会从每一条记录里整体缺席（不是 `null`——是字段不存在），涉及本命上升/天顶的相位也不再出现；行运星对本命星的相位则始终照常给出，其中涉及本命月亮的相位在本命时间非精确时都会标 `uncertain: true`。
 
 ### 4. `find_retrograde`（逆行期查询）
 
