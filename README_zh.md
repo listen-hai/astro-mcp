@@ -167,7 +167,7 @@ npx -y @lhk714/astro-mcp@latest
 - 仅五颗小天体（凯龙 + 谷神/智神/婚神/灶神），不含完整小行星表——同一条代码路径，需要时可以再加。
 - 不含恒星（fixed stars）、福点以外的阿拉伯点、映点（antiscia）。
 - 仅两种 ayanamsa（Lahiri、Fagan-Bradley）——Krishnamurti 等未实现。
-- 容许度（orb）暂未开放为输入参数（上表中的默认值是固定的）。
+- 暂无合盘、行运、推运、返照盘——目前只做本命盘。
 
 ## 📜 许可证
 
