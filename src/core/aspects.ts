@@ -34,6 +34,12 @@ export interface AspectOptions {
   orbs?: Partial<Record<string, number>>;
   /** Orb for parallel/contraparallel declination aspects (default 1 deg). */
   declinationOrb?: number;
+  /** Include aspects touching the South Node. Off by default: the South Node
+   * is 180 deg from the North Node by construction, so any aspect to it is
+   * an automatic, same-orb mirror of one to the North Node -- reporting both
+   * doubles the node rows for zero new fact (astro.com/astro-seek/TimePassages/
+   * 爱星盘 all default to hiding it). See the mirror-awareness note below. */
+  southNodeAspects?: boolean;
 }
 
 interface AspectDef {
@@ -118,11 +124,26 @@ function aspectsForPair(
 ): Aspect[] {
   const results: Aspect[] = [];
   const sep = separation(p1.lon, p2.lon);
+  const touchesSouthNode = p1.id === 'SouthNode' || p2.id === 'SouthNode';
+  const suppressSouthNode = touchesSouthNode && !opts.southNodeAspects;
 
   for (const def of defs) {
     const orb = opts.orbs?.[def.key] ?? def.orb;
     const delta = Math.abs(sep - def.angle);
     if (delta <= orb) {
+      // South Node aspects are suppressed by default -- but only when they are
+      // genuinely redundant. The Node axis is 180 deg by construction, so an
+      // aspect of angle X to the South Node guarantees one of angle (180 - X)
+      // to the North Node at the identical orb. That mirror is only a fact
+      // already captured elsewhere if (180 - X) is itself a currently active
+      // aspect type (e.g. quintile's 108 deg mirror is not a defined aspect at
+      // all, so "planet quintile South Node" would vanish entirely rather
+      // than deduplicate -- it must stay).
+      if (suppressSouthNode) {
+        const mirrorAngle = 180 - def.angle;
+        const mirrorIsActive = defs.some((d) => d.angle === mirrorAngle);
+        if (mirrorIsActive) break; // redundant with the equivalent North Node aspect
+      }
       results.push({
         body1: p1.body,
         body2: p2.body,
@@ -134,7 +155,13 @@ function aspectsForPair(
     }
   }
 
-  if (opts.declinationAspects) {
+  // Declination parallel/contraparallel has no separate "types" to be
+  // mirror-aware about the way major/minor angles do -- the South Node's
+  // declination is always the negative of the North Node's, so "P parallel
+  // SouthNode" and "P contraparallel NorthNode" are the same fact whenever
+  // declination aspects are even on. Unconditional suppression here, unlike
+  // the angle-based check above.
+  if (opts.declinationAspects && !suppressSouthNode) {
     const parallelOrb = Math.abs(p1.dec - p2.dec);
     const contraOrb = Math.abs(p1.dec + p2.dec);
     if (parallelOrb <= declinationOrb) {
