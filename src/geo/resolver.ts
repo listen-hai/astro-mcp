@@ -51,9 +51,9 @@ function toCityEntry(ct: CityTimezoneEntry): CityEntry {
     province: ct.province,
     longitude: ct.lng,
     latitude: ct.lat,
+    population: ct.pop,
     timezone,
     alternateTimezones: alternateTimezones.length > 0 ? alternateTimezones : undefined,
-    population: ct.pop,
   };
 }
 
@@ -217,24 +217,12 @@ export function resolveLocation(input: {
 
       if (sameTimezone && sameSpot) {
         const city = candidates[0];
-        const LAT_SPREAD_THRESHOLD = 1; // degrees
-        const lats = exactNameMatches.map(c => c.latitude);
-        const latSpread = Math.max(...lats) - Math.min(...lats);
-        const latNote =
-          latSpread > LAT_SPREAD_THRESHOLD
-            ? `Place "${input.place}" matched multiple candidate cities sharing timezone "${city.timezone}" but ` +
-              `differing in latitude by ${latSpread.toFixed(1)}°, which changes the Ascendant; picked ` +
-              `"${city.name} (${city.country})". Candidates: ` +
-              exactNameMatches.map(c => `${c.name} (${c.province || ''}, ${c.country}) @ ${c.latitude}°N`).join('; ')
-            : undefined;
-
         const isAlternateTz = Boolean(input.timezone && city.alternateTimezones?.includes(input.timezone));
         const isCustomTz = Boolean(input.timezone && input.timezone !== city.timezone && !isAlternateTz);
         const locationSource: 'resolved' | 'mixed' = isCustomTz ? 'mixed' : 'resolved';
-        const customTzNote = isCustomTz
+        const mixedWarning = isCustomTz
           ? `Place "${input.place}" was resolved for coordinates (${city.longitude}°), but custom timezone ("${input.timezone}") was supplied by caller.`
           : undefined;
-        const mixedWarning = [customTzNote, latNote].filter(Boolean).join(' ') || undefined;
 
         return {
           longitude: city.longitude,
@@ -248,8 +236,8 @@ export function resolveLocation(input: {
         };
       }
 
-      // Timezones disagree -> refuse and list candidates.
-      // Getting the wrong timezone silently is catastrophic for a natal chart.
+      // Timezones disagree -> always refuse and list candidates.
+      // Getting the wrong timezone silently is catastrophic for a bazi chart.
       // The calling AI agent can easily clarify with the user and retry.
       // Refuse rather than pick, and give the agent what it needs to ASK --
       // but nothing that nudges it toward an answer. Province and country are
