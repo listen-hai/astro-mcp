@@ -119,6 +119,8 @@ export interface Ctx {
   zodiac: Zodiac;
   node: 'true' | 'mean';
   lilithKind: 'mean' | 'true';
+  /** Whether the Part of Fortune formula reverses on a night chart. */
+  partOfFortune: 'reverse_at_night' | 'never_reverse';
   minorAspects: boolean;
   declinationAspects: boolean;
   southNodeAspects: boolean;
@@ -141,6 +143,7 @@ export function buildCtx(input: AstroInput): Ctx {
   const zodiac = (input.zodiac ?? ASTRO_DEFAULTS.zodiac) as Zodiac;
   const node = (input.node ?? ASTRO_DEFAULTS.node) as 'true' | 'mean';
   const lilithKind = (input.lilith ?? ASTRO_DEFAULTS.lilith) as 'mean' | 'true';
+  const partOfFortuneRule = (input.partOfFortune ?? ASTRO_DEFAULTS.partOfFortune) as 'reverse_at_night' | 'never_reverse';
   const minorAspects = input.minorAspects ?? ASTRO_DEFAULTS.minorAspects;
   const declinationAspects = input.declinationAspects ?? ASTRO_DEFAULTS.declinationAspects;
   const southNodeAspects = input.southNodeAspects ?? ASTRO_DEFAULTS.southNodeAspects;
@@ -177,6 +180,7 @@ export function buildCtx(input: AstroInput): Ctx {
     zodiac,
     node,
     lilithKind,
+    partOfFortune: partOfFortuneRule,
     minorAspects,
     declinationAspects,
     southNodeAspects,
@@ -196,6 +200,7 @@ export function buildCtx(input: AstroInput): Ctx {
       zodiac,
       node,
       lilith: lilithKind,
+      partOfFortune: partOfFortuneRule,
       orbs: effectiveOrbTable(minorAspects, lang, input.orbs),
       included,
       ephemeris: `astronomy-engine@${astronomyEngineVersion()}`,
@@ -319,8 +324,14 @@ function computeExact(input: AstroInput, ctx: Ctx): AstroChart {
   // forward arc from the raw Ascendant gives the same answer independent of
   // ctx.houseSystem.
   const dayChart = fwdArc(rawAsc, sunRaw!.lon) >= 180;
+  // Whether a night chart swaps Sun and Moon is a school choice, not arithmetic.
+  // The sect-based reading (default) reverses; part of modern practice applies
+  // the day formula to every chart. Both agree on every day chart, so this can
+  // only ever move a night one -- `dayChart` says which this is, and
+  // `diagnostics.partOfFortune` says which rule produced the longitude.
+  const reverse = dayChart ? false : ctx.partOfFortune === 'reverse_at_night';
   const pofRaw = norm360(
-    rawAsc + (dayChart ? moonRaw!.lon - sunRaw!.lon : sunRaw!.lon - moonRaw!.lon)
+    rawAsc + (reverse ? sunRaw!.lon - moonRaw!.lon : moonRaw!.lon - sunRaw!.lon)
   );
   const pofDisplay = toZodiac(pofRaw, ctx.zodiac, utc);
 

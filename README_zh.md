@@ -112,6 +112,7 @@ npx -y @lhk714/astro-mcp@latest
 | `zodiac` | `tropical`（回归黄道） | `sidereal-lahiri`、`sidereal-fagan-bradley` | 回归黄道是西方主流；两种恒星黄道 ayanamsa 面向偏印度占星的使用场景。 |
 | `node`（交点） | `"true"`（真交点） | `"mean"`（平交点） | 现代偏好——`auseklis` 只有平交点。真/平最大可差约 1.6°，足以跨星座边界。 |
 | `lilith`（莉莉丝） | `"mean"`（平均远地点） | `"true"`（真实瞬时远地点） | 流行占星的通行口径；`"true"` 是小众选择。 |
+| `partOfFortune`（福点公式） | `"reverse_at_night"`（日盘 上升+月−日，夜盘 上升+日−月） | `"never_reverse"`（一律用日盘公式） | 日盘下两者完全相同；夜盘下可能差几十度，足以跨星座跨宫。`partOfFortune.dayChart` 说明本盘属哪一种。 |
 | `minorAspects`（次相位） | `false` | `true` | 默认只算五个主相位（合/六合/刑/拱/冲）。 |
 | `declinationAspects`（赤纬相位） | `false` | `true` | 小众口径——也正是 `auseklis` 曾经硬编码零赤纬伪造结果的地方。启用后使用由黄纬实算得出的真实赤纬。 |
 | 容许度（orb） | 合/冲 8°，刑/拱 7°，六合 6°，次相位 2–3° | `orbs` 参数，逐相位覆写 | 现代惯例：容许度按**相位类型**定，而非按各星体自身光体（古典 moiety）定。容许度是整张盘里流派差异最大的一个数，默认值只是起点——可逐项覆写，实际生效的表会回写进 `diagnostics.orbs`。键名用英文（conjunction/sextile/square/trine/opposition/…），不随 `lang` 变化；写错的键会报错而不是被忽略。 |
@@ -125,7 +126,7 @@ npx -y @lhk714/astro-mcp@latest
 
 ### 2. `calculate_synastry`（合盘）
 
-计算两张本命盘**之间**的相位与宫位叠加：`personA`、`personB` 各自都是与 `calculate_natal` 相同的出生输入字段（`place`/`longitude`/`latitude`/`timezone`/`dstFold`/`solarDate`/`clockTime`(-`Range`)，未知时间的降级行为也一致）——**但不接受**口径开关（`houseSystem`/`zodiac`/`node`/`lilith`/`orbs`/`minorAspects`/`declinationAspects`/`asteroids`/`chiron`/`southNodeAspects`/`lang`）：这些开关只在顶层设置一次，作用于**两张盘**，也只在顶层 `diagnostics` 报一次；在 `personA`/`personB` 里传它们会被直接拒绝，而不是静默忽略。（旧版本会让逐人的 `houseSystem` 通过校验、再被顶层默认值静默覆盖；逐人的 `orbs` 还会反过来泄漏进跨盘相位，而这个人自己的本命相位却仍用默认值——同一张 `diagnostics.orbs` 表因此描述了两种不同的计算结果。在口径根本不适用的地方直接拒收，才是真正的修法。）
+计算两张本命盘**之间**的相位与宫位叠加：`personA`、`personB` 各自都是与 `calculate_natal` 相同的出生输入字段（`place`/`longitude`/`latitude`/`timezone`/`dstFold`/`solarDate`/`clockTime`(-`Range`)，未知时间的降级行为也一致）——**但不接受**口径开关（`houseSystem`/`zodiac`/`node`/`lilith`/`orbs`/`partOfFortune`/`minorAspects`/`declinationAspects`/`asteroids`/`chiron`/`southNodeAspects`/`lang`）：这些开关只在顶层设置一次，作用于**两张盘**，也只在顶层 `diagnostics` 报一次；在 `personA`/`personB` 里传它们会被直接拒绝，而不是静默忽略。（旧版本会让逐人的 `houseSystem` 通过校验、再被顶层默认值静默覆盖；逐人的 `orbs` 还会反过来泄漏进跨盘相位，而这个人自己的本命相位却仍用默认值——同一张 `diagnostics.orbs` 表因此描述了两种不同的计算结果。在口径根本不适用的地方直接拒收，才是真正的修法。）
 
 一个已知的时间**区间**（`clockTimeRange`）会让那一侧的宫位降级为**候选列表**，而不是整个消失——`overlays.aInB`/`overlays.bInA` 里对应条目会给出 `houseCandidates` 而不是单一的 `house`，与 `calculate_natal` 自己模式 B「降级、不删除」的承诺一致。只有整天都不知道出生时间（既没有 `clockTime` 也没有 `clockTimeRange`）的一侧，才会让那个方向的叠加整体缺席。
 

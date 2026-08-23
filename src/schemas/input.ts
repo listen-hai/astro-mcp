@@ -12,6 +12,7 @@ export const ASTRO_DEFAULTS = {
   zodiac: 'tropical',
   node: 'true',
   lilith: 'mean',
+  partOfFortune: 'reverse_at_night',
   minorAspects: false,
   declinationAspects: false,
   asteroids: false,
@@ -82,6 +83,13 @@ export const AstroInputObjectSchema = z
     zodiac: z.enum(['tropical', 'sidereal-lahiri', 'sidereal-fagan-bradley']).default('tropical'),
     node: z.enum(['true', 'mean']).default('true'),
     lilith: z.enum(['mean', 'true']).default('mean'),
+    partOfFortune: z.enum(['reverse_at_night', 'never_reverse']).default('reverse_at_night')
+    .describe('Whether the Part of Fortune formula reverses for a night chart. '
+      + '"reverse_at_night" (default) is the sect-based reading: Asc + Moon - Sun by '
+      + 'day, Asc + Sun - Moon by night. "never_reverse" applies the day formula to '
+      + 'every chart, as some modern practice does. The two agree on every day chart '
+      + 'and differ on every night one; `partOfFortune.dayChart` says which this is, '
+      + 'and `diagnostics.partOfFortune` echoes the rule in force.'),
     orbs: z.record(z.string(), z.number().min(0).max(30)).optional()
     .describe('Per-aspect orb overrides in degrees, keyed by aspect: conjunction, '
       + 'sextile, square, trine, opposition, semisextile, semisquare, quintile, '
@@ -137,8 +145,8 @@ export type LookupLocationInput = z.input<typeof LookupLocationSchema>;
 // ---------------------------------------------------------------------------
 
 /**
- * The house-system/zodiac/node/lilith/orbs/minorAspects/declinationAspects/
- * asteroids/chiron/southNodeAspects/lang convention switches. Synastry accepts
+ * The house-system/zodiac/node/lilith/orbs/partOfFortune/minorAspects/
+ * declinationAspects/asteroids/chiron/southNodeAspects/lang convention switches. Synastry accepts
  * these ONLY at the top level -- they apply to BOTH charts and are reported
  * once (spec: "口径开关...只在顶层 diagnostics 报一次"). A per-person `houseSystem`
  * used to be silently overridden by the top-level default (every convention
@@ -151,12 +159,12 @@ export type LookupLocationInput = z.input<typeof LookupLocationSchema>;
  * silently ignored or misapplied if the schema does not accept it there.
  */
 export const SYNASTRY_CONVENTION_KEYS = [
-  'houseSystem', 'zodiac', 'node', 'lilith', 'orbs',
+  'houseSystem', 'zodiac', 'node', 'lilith', 'orbs', 'partOfFortune',
   'minorAspects', 'declinationAspects', 'asteroids', 'chiron', 'southNodeAspects', 'lang',
 ] as const;
 
 export const SynastryPersonSchema = AstroInputObjectSchema.omit({
-  houseSystem: true, zodiac: true, node: true, lilith: true, orbs: true,
+  houseSystem: true, zodiac: true, node: true, lilith: true, orbs: true, partOfFortune: true,
   minorAspects: true, declinationAspects: true, asteroids: true, chiron: true,
   southNodeAspects: true, lang: true,
 }).strict();
