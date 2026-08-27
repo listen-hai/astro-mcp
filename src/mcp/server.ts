@@ -287,6 +287,22 @@ const retrogradeProperties: Record<string, object> = {
 const TOOLS: Tool[] = [
   {
     name: 'calculate_natal',
+      // Every tool here reads bundled tables and computes: nothing is written,
+      // nothing is fetched. All four hints are stated even though the spec
+      // calls destructiveHint/idempotentHint meaningful only when readOnlyHint
+      // is false -- "ignorable" is not "wrong", every value here is known to be
+      // true of a pure calculation, and at least one directory is reported to
+      // reject tools that leave any of the four unset. openWorldHint is the one
+      // that would actually mislead if omitted: it DEFAULTS TO TRUE, so silence
+      // tells a client these tools reach an open world when their whole domain
+      // is a bundled table.
+    annotations: {
+      title: 'Western natal chart',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     description:
       'Computes a MODERN Western astrology natal (birth) chart: Ascendant/Midheaven/houses, the ten planets plus Chiron, lunar nodes, Black Moon Lilith, the Part of Fortune, essential dignities, and aspects -- verified against JPL Horizons (see `diagnostics.accuracyNote`). This is modern astrology (Uranus/Neptune/Pluto, Chiron, Lilith, Placidus houses, aspect-type orbs); traditional/classical/Hellenistic technique (triplicities, terms/faces, classical moiety orbs, antiscia) is deliberately out of scope -- this tool will not silently approximate it.  PRESENTING UNCERTAINTY: when a field comes back as a candidate list (`signCandidates`, `houseCandidates`, `ascendantSignCandidates`, `orbRange`, `degreeRange`), report ALL of them to the user -- do not pick one, and do not narrate a range as a single value. When a field is absent, say it could not be determined and why; the reason is in `diagnostics.omitted`. Collapsing these back into a confident single answer undoes the whole point of the degradation.' +
       'Pass at most one of `clockTime` (exact birth time) or `clockTimeRange` (a known window, e.g. "evening"); omit both if the birth time is genuinely unknown. This is the core design commitment of this tool: it NEVER fabricates a birth time -- there is no default-to-noon fallback. With `clockTime`, the full chart is returned. With `clockTimeRange`, the Ascendant/Midheaven/houses reduce to candidate sign segments (`partOfFortune` is omitted entirely -- it needs both the Ascendant and the day/night determination, and a window settles neither) (`diagnostics.method` is "bisect" below the polar circle where the Ascendant is provably monotonic, or "scan" above it -- see `diagnostics.ascendantMonotonic`); `aspects[].applying` is omitted (it needs an exact relative speed). With neither given, `angles`/`houses`/`positions[].house`/`partOfFortune` are OMITTED FIELDS entirely (not null) -- check `diagnostics.omitted` for why each one is absent -- and the Sun/Moon/other bodies report a `sign` (or `signCandidates` on a day the Sun crosses a sign boundary, ~12 days/year) with a `degreeRange` instead of a single degree. ' +
@@ -300,6 +316,13 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'calculate_synastry',
+    annotations: {
+      title: 'Synastry between two charts',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     description:
       'Synastry (合盘): aspects and house overlays BETWEEN two natal charts, `personA` and `personB` -- this is a comparison, not a single natal chart (call calculate_natal for that). Both people accept the same birth-input contract as calculate_natal (place/longitude/latitude/timezone/dstFold/solarDate/clockTime(-Range)), including its unknown-birth-time behavior (NEVER fabricates a birth time) -- EXCEPT the convention switches (houseSystem/zodiac/node/lilith/orbs/minorAspects/declinationAspects/asteroids/chiron/southNodeAspects/lang), which `personA`/`personB` do NOT accept at all (rejected outright, not silently ignored): those apply to BOTH charts uniformly and are set and reported once, in the top-level `diagnostics`, never per person.  PRESENTING UNCERTAINTY: when a field comes back as a candidate list (`signCandidates`, `houseCandidates`, `ascendantSignCandidates`, `orbRange`, `degreeRange`), report ALL of them to the user -- do not pick one, and do not narrate a range as a single value. When a field is absent, say it could not be determined and why; the reason is in `diagnostics.omitted`. Collapsing these back into a confident single answer undoes the whole point of the degradation.'
       + 'A time WINDOW (`clockTimeRange`) on either side degrades that side\'s houses to a candidate list rather than deleting them: `overlays.*.houseCandidates` and `transiting[].natalHouseCandidates`-style degradation (see calculate_natal\'s own `clockTimeRange` behavior) -- only a whole-day-unknown side loses its houses entirely. '
@@ -313,6 +336,13 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'calculate_transits',
+    annotations: {
+      title: 'Transits to a natal chart',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     description:
       'Transits (行运): where the sky stands RIGHT NOW (or at any given instant) against a natal chart. Takes the exact same flat birth-input fields as calculate_natal (place/longitude/latitude/timezone/dstFold/solarDate/clockTime(-Range)) plus an optional `target`: the instant to compute the transiting sky for (`target.solarDate` and `target.clockTime` are both required together if `target` is given at all). Omitting `target` entirely defaults to the current instant ("now") -- see `diagnostics.targetSource`/`diagnostics.targetUtc`. A `target` before the birth instant is rejected: a transit only makes sense against a chart that already exists.  PRESENTING UNCERTAINTY: when a field comes back as a candidate list (`signCandidates`, `houseCandidates`, `ascendantSignCandidates`, `orbRange`, `degreeRange`), report ALL of them to the user -- do not pick one, and do not narrate a range as a single value. When a field is absent, say it could not be determined and why; the reason is in `diagnostics.omitted`. Collapsing these back into a confident single answer undoes the whole point of the degradation.'
       + 'The transiting sky is always exact (the target instant is always known) -- ALL degradation is on the NATAL side. A natal time WINDOW (`clockTimeRange`) degrades `transiting[].natalHouse` to `transiting[].natalHouseCandidates` (a candidate list, spec mode B) rather than deleting it. Only an entirely unknown (date-only) natal birth time OMITS `transiting[].natalHouse` from every entry (not null; see `diagnostics.omitted`) and drops aspects to the natal Ascendant/Midheaven -- planet-to-planet aspects to the natal chart still work either way, and any surviving aspect touching the natal Moon is flagged `uncertain: true` when the natal time is not exact (the Moon moves 12-15 deg/day).',
@@ -325,6 +355,13 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'find_retrograde',
+    annotations: {
+      title: 'Retrograde stations and periods',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     description:
       'Finds retrograde periods for one body within a calendar window (up to 5 years) -- no birth data needed at all, this is a pure ephemeris lookup (e.g. "水星逆行", Mercury retrograde, by far the most widely recognised astrology concept in Chinese online culture). Each period reports its exact station-retrograde/station-direct instants (`startsUtc`/`endsUtc`, ISO 8601 UTC) and the zodiac sign the retrograde begins in (`startSign`). '
       + 'The Sun and Moon are refused outright with an explicit "never retrograde" error (apparent retrograde motion is an artifact of viewing another planet from a moving Earth; the Sun and Moon have no such effect) rather than silently returning an empty period list, which would read as "not retrograde this window" instead of "this concept does not apply". A window longer than 5 years is refused rather than grinding through a slow day-by-day scan -- split it into smaller windows instead.',
@@ -337,6 +374,13 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'lookup_location',
+    annotations: {
+      title: 'Resolve a birthplace',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     description:
       'Looks up a city\'s geographic coordinates (longitude, latitude) and IANA timezone. Use this BEFORE a chart tool whenever the place name might be ambiguous -- it is cheaper than a refused chart call. IMPORTANT: use ENGLISH city names; translate first if given another language (e.g. 东京 -> "Tokyo", 巴黎 -> "Paris"). When more than one city comes back, ASK the user which one they mean -- do not pick the first, the largest, or the most likely one. The response reports `matched` (true hit count) and `shown` (after the cap), so a capped list never reads as exhaustive. Covers 7,329 cities across 227 countries -- the same database used by ziwei-mcp/bazi-mcp\'s own lookup_location.',
     inputSchema: {
